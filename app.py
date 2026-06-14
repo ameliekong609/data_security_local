@@ -12,7 +12,7 @@ import tempfile
 
 import streamlit as st
 
-from src.config_loader import default_redaction_config, load_config
+from src.config_loader import default_redaction_config
 from src.review_state import DetectionStatus, ReviewSession
 from src.review_workflow import (
     add_custom_detection_from_pdf,
@@ -67,23 +67,8 @@ def _write_uploaded_pdf(temp_root: Path, uploaded) -> Path:
 
 with st.sidebar:
     st.header("1. Select local PDFs")
-    folder = st.text_input(
-        "Optional local folder path",
-        "",
-        help="Use this when the app is running on your own machine. In browser/cloud use, choose a folder below.",
-    )
-    explicit_files = st.text_area(
-        "Optional PDF paths, one per line",
-        help="Use this when files are outside the selected folder.",
-    )
-    with st.expander("Advanced local config"):
-        config_path = st.text_input(
-            "Optional YAML rule file",
-            "",
-            help="Leave blank to use built-in generic local rules.",
-        )
     uploads = st.file_uploader(
-        "Or choose a folder of PDFs",
+        "Choose a folder of PDFs",
         type=["pdf"],
         accept_multiple_files="directory",
         help="Select a directory; PDFs in the directory and subdirectories will be uploaded into this session.",
@@ -91,18 +76,17 @@ with st.sidebar:
     output_dir = st.text_input("Output folder", "review_outputs")
 
     if st.button("Detect locally", type="primary"):
-        selected = [line.strip() for line in explicit_files.splitlines() if line.strip()]
         temp_paths = []
         if uploads:
             temp_root = Path(tempfile.mkdtemp(prefix="local-review-pdfs-"))
             for uploaded in uploads:
                 temp_paths.append(_write_uploaded_pdf(temp_root, uploaded))
         try:
-            pdf_paths = collect_pdf_files(selected + temp_paths, folder or None)
+            pdf_paths = collect_pdf_files(temp_paths)
             if not pdf_paths:
                 st.error("No local PDF files selected.")
             else:
-                config = load_config(config_path) if config_path.strip() else default_redaction_config()
+                config = default_redaction_config()
                 review = ReviewSession()
                 warnings = []
                 for pdf_path in pdf_paths:
