@@ -121,6 +121,37 @@ else:
     rejected = sum(1 for d in review.detections if d.status == DetectionStatus.REJECTED)
     st.write(f"Pending: {pending} · Approved: {approved} · Rejected: {rejected}")
 
+    st.subheader("Bulk review")
+    bulk_col1, bulk_col2 = st.columns(2)
+    with bulk_col1:
+        if st.button("Approve all pending", disabled=pending == 0):
+            changed = review.approve_pending()
+            st.success(f"Approved {changed} pending detection(s).")
+            st.rerun()
+    with bulk_col2:
+        if st.button("Reject all pending", disabled=pending == 0):
+            changed = review.reject_pending(reason="Bulk rejected in local UI")
+            st.warning(f"Rejected {changed} pending detection(s).")
+            st.rerun()
+
+    pending_detections = [d for d in review.detections if d.status == DetectionStatus.PENDING]
+    if pending_detections:
+        file_options = sorted({d.document_name for d in pending_detections})
+        type_options = sorted({d.entity_type for d in pending_detections})
+        scoped_col1, scoped_col2 = st.columns(2)
+        with scoped_col1:
+            selected_file = st.selectbox("Pending file", file_options)
+            if st.button("Approve pending in this file"):
+                changed = review.approve_pending(document_name=selected_file)
+                st.success(f"Approved {changed} pending detection(s) in {selected_file}.")
+                st.rerun()
+        with scoped_col2:
+            selected_type = st.selectbox("Pending type", type_options)
+            if st.button("Approve pending of this type"):
+                changed = review.approve_pending(entity_type=selected_type)
+                st.success(f"Approved {changed} pending {selected_type} detection(s).")
+                st.rerun()
+
     for detection in review.detections:
         label = (
             f"{detection.document_name} p.{detection.page_label} · "

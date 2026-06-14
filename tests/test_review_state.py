@@ -5,6 +5,8 @@ import fitz
 from src.deterministic_redactor import Redaction
 from src.review_state import (
     DetectionStatus,
+    ReviewDetection,
+    ReviewSession,
     build_review_session,
 )
 
@@ -64,3 +66,80 @@ def test_review_session_supports_edit_reject_custom_and_confirmed_map(tmp_path):
     }
     assert review.detections[0].replacement_label == "[CLIENT_PERSON_1]"
     assert review.detections[0].status == DetectionStatus.REJECTED
+
+
+def test_review_session_bulk_approves_pending_by_file_and_type():
+    review = ReviewSession(
+        detections=[
+            ReviewDetection(
+                detection_id="d1",
+                document_path="/tmp/a.pdf",
+                document_name="a.pdf",
+                page_num=0,
+                original_text="a@example.test",
+                entity_type="email",
+                replacement_label="[EMAIL_1]",
+            ),
+            ReviewDetection(
+                detection_id="d2",
+                document_path="/tmp/a.pdf",
+                document_name="a.pdf",
+                page_num=0,
+                original_text="123456",
+                entity_type="account",
+                replacement_label="[ACCOUNT_1]",
+            ),
+            ReviewDetection(
+                detection_id="d3",
+                document_path="/tmp/b.pdf",
+                document_name="b.pdf",
+                page_num=0,
+                original_text="b@example.test",
+                entity_type="email",
+                replacement_label="[EMAIL_2]",
+            ),
+        ]
+    )
+
+    assert review.approve_pending(document_name="a.pdf") == 2
+    assert [d.status for d in review.detections] == [
+        DetectionStatus.APPROVED,
+        DetectionStatus.APPROVED,
+        DetectionStatus.PENDING,
+    ]
+
+    assert review.approve_pending(entity_type="email") == 1
+    assert all(d.status == DetectionStatus.APPROVED for d in review.detections)
+
+
+def test_review_session_bulk_rejects_pending():
+    review = ReviewSession(
+        detections=[
+            ReviewDetection(
+                detection_id="d1",
+                document_path="/tmp/a.pdf",
+                document_name="a.pdf",
+                page_num=0,
+                original_text="a@example.test",
+                entity_type="email",
+                replacement_label="[EMAIL_1]",
+            ),
+            ReviewDetection(
+                detection_id="d2",
+                document_path="/tmp/b.pdf",
+                document_name="b.pdf",
+                page_num=0,
+                original_text="123456",
+                entity_type="account",
+                replacement_label="[ACCOUNT_1]",
+            ),
+        ]
+    )
+
+    assert review.reject_pending(entity_type="email", reason="bulk test") == 1
+    assert review.detections[0].status == DetectionStatus.REJECTED
+    assert review.detections[0].rejection_reason == "bulk test"
+    assert review.detections[1].status == DetectionStatus.PENDING
+
+    assert review.reject_pending() == 1
+    assert all(d.status == DetectionStatus.REJECTED for d in review.detections)

@@ -96,6 +96,53 @@ class ReviewSession:
         self.confirmed = False
         return detection
 
+    def approve_pending(
+        self,
+        *,
+        document_name: str | None = None,
+        entity_type: str | None = None,
+    ) -> int:
+        """Approve pending detections, optionally scoped to one file or type."""
+
+        changed = 0
+        for detection in self.detections:
+            if detection.status != DetectionStatus.PENDING:
+                continue
+            if document_name is not None and detection.document_name != document_name:
+                continue
+            if entity_type is not None and detection.entity_type != entity_type:
+                continue
+            detection.status = DetectionStatus.APPROVED
+            detection.rejection_reason = ""
+            changed += 1
+        if changed:
+            self.confirmed = False
+        return changed
+
+    def reject_pending(
+        self,
+        *,
+        document_name: str | None = None,
+        entity_type: str | None = None,
+        reason: str = "",
+    ) -> int:
+        """Reject pending detections, optionally scoped to one file or type."""
+
+        changed = 0
+        for detection in self.detections:
+            if detection.status != DetectionStatus.PENDING:
+                continue
+            if document_name is not None and detection.document_name != document_name:
+                continue
+            if entity_type is not None and detection.entity_type != entity_type:
+                continue
+            detection.status = DetectionStatus.REJECTED
+            detection.rejection_reason = reason
+            changed += 1
+        if changed:
+            self.confirmed = False
+        return changed
+
     def edit_detection(
         self,
         detection_id: str,
