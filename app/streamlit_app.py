@@ -269,20 +269,14 @@ def render_detection(profile: RedactionProfile | None) -> None:
         review_df = pd.DataFrame(_finding_rows(findings))
         grouped = (
             review_df
-            .groupby(["File", "Entity type", "Replacement", "Status"], dropna=False)
+            .groupby(["File", "Entity type", "Detected text", "Replacement", "Status"], dropna=False)
             .size()
             .reset_index(name="Count")
-            .sort_values(["File", "Entity type", "Replacement", "Status"])
+            .rename(columns={"Detected text": "Original"})
+            .sort_values(["File", "Entity type", "Original", "Replacement", "Status"])
         )
+        st.caption("Review original → replacement groups first. Open the detailed row editor only for exceptions or spot checks.")
         st.dataframe(grouped, hide_index=True, use_container_width=True)
-
-        st.subheader("Context review table")
-        st.caption("Before / Detected text / After helps reviewers spot-check without opening the detailed editor.")
-        st.dataframe(
-            review_df[["File", "Page", "Entity type", "Status", "Before", "Detected text", "After", "Replacement"]],
-            hide_index=True,
-            use_container_width=True,
-        )
 
         st.subheader("Batch review actions")
         col1, col2, col3 = st.columns(3)
