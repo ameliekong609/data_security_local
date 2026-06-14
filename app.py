@@ -150,6 +150,32 @@ else:
     rejected = sum(1 for d in review.detections if d.status == DetectionStatus.REJECTED)
     st.write(f"Pending: {pending} · Approved: {approved} · Rejected: {rejected}")
 
+    grouped_counts: dict[tuple[str, str, str, str], int] = {}
+    for detection in review.detections:
+        key = (
+            detection.document_name,
+            detection.entity_type,
+            detection.replacement_label,
+            detection.status.value,
+        )
+        grouped_counts[key] = grouped_counts.get(key, 0) + 1
+    st.subheader("Detection summary")
+    st.caption("Review by group first. Open individual detections only when you need to inspect exceptions.")
+    st.dataframe(
+        [
+            {
+                "File": document_name,
+                "Entity type": entity_type,
+                "Replacement": replacement_label,
+                "Status": status,
+                "Count": count,
+            }
+            for (document_name, entity_type, replacement_label, status), count in sorted(grouped_counts.items())
+        ],
+        hide_index=True,
+        use_container_width=True,
+    )
+
     st.subheader("Bulk review")
     bulk_col1, bulk_col2 = st.columns(2)
     with bulk_col1:
@@ -181,54 +207,60 @@ else:
                 st.success(f"Approved {changed} pending {selected_type} detection(s).")
                 st.rerun()
 
-    for detection in review.detections:
-        label = (
-            f"{detection.document_name} p.{detection.page_label} · "
-            f"{detection.entity_type} · {detection.status.value} · {detection.replacement_label}"
-        )
-        with st.expander(label, expanded=detection.status == DetectionStatus.PENDING):
-            st.markdown("**Context**")
-            st.code(f"...{detection.context_before}«{detection.original_text}»{detection.context_after}...", language="text")
-            col1, col2, col3 = st.columns([1, 1, 1])
-            with col1:
-                current_type_index = ENTITY_TYPES.index(detection.entity_type) if detection.entity_type in ENTITY_TYPES else 0
-                entity_type = st.selectbox(
-                    "Entity type",
-                    ENTITY_TYPES,
-                    index=current_type_index,
-                    key=f"type-{detection.detection_id}",
-                )
-            with col2:
-                replacement_label = st.text_input(
-                    "Replacement label",
-                    value=detection.replacement_label,
-                    key=f"replacement-{detection.detection_id}",
-                )
-            with col3:
-                original_text = st.text_input(
-                    "Matched text",
-                    value=detection.original_text,
-                    key=f"original-{detection.detection_id}",
-                )
-            review.edit_detection(
-                detection.detection_id,
-                entity_type=entity_type,
-                replacement_label=replacement_label,
-                original_text=original_text,
+    show_individual_editor = st.toggle(
+        "Show individual detection editor",
+        value=False,
+        help="Leave this closed for normal review. Open it only for spot checks or row-level corrections.",
+    )
+    if show_individual_editor:
+        for detection in review.detections:
+            label = (
+                f"{detection.document_name} p.{detection.page_label} · "
+                f"{detection.entity_type} · {detection.status.value} · {detection.replacement_label}"
             )
+            with st.expander(label, expanded=detection.status == DetectionStatus.PENDING):
+                st.markdown("**Context**")
+                st.code(f"...{detection.context_before}«{detection.original_text}»{detection.context_after}...", language="text")
+                col1, col2, col3 = st.columns([1, 1, 1])
+                with col1:
+                    current_type_index = ENTITY_TYPES.index(detection.entity_type) if detection.entity_type in ENTITY_TYPES else 0
+                    entity_type = st.selectbox(
+                        "Entity type",
+                        ENTITY_TYPES,
+                        index=current_type_index,
+                        key=f"type-{detection.detection_id}",
+                    )
+                with col2:
+                    replacement_label = st.text_input(
+                        "Replacement label",
+                        value=detection.replacement_label,
+                        key=f"replacement-{detection.detection_id}",
+                    )
+                with col3:
+                    original_text = st.text_input(
+                        "Matched text",
+                        value=detection.original_text,
+                        key=f"original-{detection.detection_id}",
+                    )
+                review.edit_detection(
+                    detection.detection_id,
+                    entity_type=entity_type,
+                    replacement_label=replacement_label,
+                    original_text=original_text,
+                )
 
-            action1, action2, action3 = st.columns([1, 1, 2])
-            with action1:
-                if st.button("Approve", key=f"approve-{detection.detection_id}"):
-                    review.approve_detection(detection.detection_id)
-                    st.rerun()
-            with action2:
-                if st.button("Reject", key=f"reject-{detection.detection_id}"):
-                    review.reject_detection(detection.detection_id, reason="Rejected in local UI")
-                    st.rerun()
-            with action3:
-                if detection.rect is None:
-                    st.warning("This custom item is in the replacement map but is not anchored for PDF redaction export.")
+                action1, action2, action3 = st.columns([1, 1, 2])
+                with action1:
+                    if st.button("Approve", key=f"approve-{detection.detection_id}"):
+                        review.approve_detection(detection.detection_id)
+                        st.rerun()
+                with action2:
+                    if st.button("Reject", key=f"reject-{detection.detection_id}"):
+                        review.reject_detection(detection.detection_id, reason="Rejected in local UI")
+                        st.rerun()
+                with action3:
+                    if detection.rect is None:
+                        st.warning("This custom item is in the replacement map but is not anchored for PDF redaction export.")
 
 st.header("3. Add a missed custom detection")
 if pdf_paths:
@@ -259,7 +291,9 @@ else:
 st.header("4. Confirm replacement map and export")
 if review.detections:
     replacement_map = review.export_replacement_map()
-    st.json(replacement_map)
+    st.caption(f"Replacement map contains {len(replacement_map)} approved item(s). It is hidden by default because it can be long and sensitive.")
+    if st.toggle("Show replacement map preview", value=False):
+        st.json(replacement_map)
     col1, col2 = st.columns(2)
     with col1:
         if st.button("Confirm replacement map"):

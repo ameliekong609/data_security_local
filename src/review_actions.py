@@ -23,10 +23,39 @@ class ReviewLoopSummary:
     stop_reason: str
 
 
+def set_all_findings_status(
+    findings: Iterable[DetectionCandidate],
+    status: str,
+) -> None:
+    """Mark every current finding with the requested review status."""
+    normalized_status = status.strip().lower()
+    for finding in findings:
+        finding.status = normalized_status
+
+
 def approve_all_findings(findings: Iterable[DetectionCandidate]) -> None:
     """Mark every current finding approved for local export."""
+    set_all_findings_status(findings, "approved")
+
+
+def set_findings_status_by_entity(
+    findings: Iterable[DetectionCandidate],
+    *,
+    entity_type: str,
+    status: str,
+) -> int:
+    """Mark findings of one entity type with the requested review status.
+
+    Returns the number of findings changed so the UI can show a useful message.
+    """
+    normalized_entity_type = entity_type.strip().casefold()
+    normalized_status = status.strip().lower()
+    changed = 0
     for finding in findings:
-        finding.status = "approved"
+        if finding.entity_type.strip().casefold() == normalized_entity_type:
+            finding.status = normalized_status
+            changed += 1
+    return changed
 
 
 def finding_key(finding: DetectionCandidate) -> tuple[object, ...]:

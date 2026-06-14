@@ -17,6 +17,8 @@ from src.export_workflow import export_reviewed_pdf
 from src.review_actions import (
     approve_all_findings,
     record_seen_findings,
+    set_all_findings_status,
+    set_findings_status_by_entity,
     summarize_review_loop,
 )
 from src.services.custom_terms import CustomTermDetector, ReviewFinding
@@ -125,12 +127,35 @@ def render_profile_editor(store: ProfileStore) -> RedactionProfile | None:
             st.success("Term saved locally.")
             st.rerun()
 
-    st.subheader("3. Edit profile terms")
+    st.subheader("3. Profile terms")
     if not profile.terms:
         st.info("No custom terms in this profile yet.")
         return profile
 
-    for term in profile.terms:
+    st.caption(f"{len(profile.terms)} custom term(s) saved locally. Term editing is hidden by default so detection review stays readable.")
+    show_term_editor = st.toggle("Show term editor", value=False, help="Only open this when you need to change saved profile terms.")
+    if not show_term_editor:
+        return profile
+
+    term_search = st.text_input("Search terms to edit", placeholder="Type original term, replacement, entity type, or variant")
+    normalized_search = term_search.casefold().strip()
+    visible_terms = [
+        term for term in profile.terms
+        if not normalized_search
+        or normalized_search in term.original.casefold()
+        or normalized_search in term.entity_type.casefold()
+        or normalized_search in term.replacement.casefold()
+        or any(normalized_search in variant.casefold() for variant in term.variants)
+    ]
+    if not visible_terms:
+        st.info("No profile terms match that search.")
+        return profile
+
+    display_terms = visible_terms[:25]
+    if len(visible_terms) > len(display_terms):
+        st.info(f"Showing first {len(display_terms)} of {len(visible_terms)} matching terms. Narrow the search to edit a specific term.")
+
+    for term in display_terms:
         with st.expander(f"{term.entity_type} → {term.replacement}"):
             with st.form(f"edit-{term.term_id}"):
                 original = st.text_input("Original", value=term.original, key=f"orig-{term.term_id}")
@@ -234,29 +259,69 @@ def render_detection(profile: RedactionProfile | None) -> None:
 
     findings = st.session_state.get("custom_term_findings", [])
     if findings:
-        st.subheader("Review table")
-        st.caption("Set each finding to approved/rejected/pending, edit type/replacement, then export approved findings locally.")
-        edited = st.data_editor(
-            pd.DataFrame(_finding_rows(findings)),
-            column_config={
-                "Status": st.column_config.SelectboxColumn(
-                    "Status",
-                    options=["pending", "approved", "rejected"],
-                    required=True,
-                ),
-                "Entity type": st.column_config.SelectboxColumn(
-                    "Entity type",
-                    options=ENTITY_TYPES,
-                    required=True,
-                ),
-            },
-            disabled=["File", "Page", "Detected text", "Source", "Confidence"],
-            hide_index=True,
-            use_container_width=True,
+        st.subheader("Review findings")
+        st.caption("Use the batch buttons first. Open the detailed table only for exceptions or spot checks.")
+
+        review_df = pd.DataFrame(_finding_rows(findings))
+        grouped = (
+            review_df
+            .groupby(["File", "Entity type", "Replacement", "Status"], dropna=False)
+            .size()
+            .reset_index(name="Count")
+            .sort_values(["File", "Entity type", "Replacement", "Status"])
         )
-        findings = _apply_review_table(findings, edited)
-        st.session_state["custom_term_findings"] = findings
-        st.session_state["custom_term_review_table"] = edited
+        st.dataframe(grouped, hide_index=True, use_container_width=True)
+
+        st.subheader("Batch review actions")
+        col1, col2, col3 = st.columns(3)
+        if col1.button("Approve all current findings"):
+            approve_all_findings(findings)
+            st.session_state["custom_term_findings"] = findings
+            st.session_state["review_complete"] = False
+            st.rerun()
+        if col2.button("Reject all current findings"):
+            set_all_findings_status(findings, "rejected")
+            st.session_state["custom_term_findings"] = findings
+            st.session_state["review_complete"] = False
+            st.rerun()
+        entity_options = sorted({finding.entity_type for finding in findings})
+        selected_entity = col3.selectbox("Entity batch", entity_options)
+        col4, col5 = st.columns(2)
+        if col4.button(f"Approve all {selected_entity}"):
+            changed = set_findings_status_by_entity(findings, entity_type=selected_entity, status="approved")
+            st.session_state["custom_term_findings"] = findings
+            st.session_state["review_complete"] = False
+            st.success(f"Approved {changed} {selected_entity} finding(s).")
+            st.rerun()
+        if col5.button(f"Reject all {selected_entity}"):
+            changed = set_findings_status_by_entity(findings, entity_type=selected_entity, status="rejected")
+            st.session_state["custom_term_findings"] = findings
+            st.session_state["review_complete"] = False
+            st.success(f"Rejected {changed} {selected_entity} finding(s).")
+            st.rerun()
+
+        if st.toggle("Show detailed row editor", value=False, help="Use this only when you need to change individual rows, labels, or replacements."):
+            edited = st.data_editor(
+                review_df,
+                column_config={
+                    "Status": st.column_config.SelectboxColumn(
+                        "Status",
+                        options=["pending", "approved", "rejected"],
+                        required=True,
+                    ),
+                    "Entity type": st.column_config.SelectboxColumn(
+                        "Entity type",
+                        options=ENTITY_TYPES,
+                        required=True,
+                    ),
+                },
+                disabled=["File", "Page", "Detected text", "Source", "Confidence"],
+                hide_index=True,
+                use_container_width=True,
+            )
+            findings = _apply_review_table(findings, edited)
+            st.session_state["custom_term_findings"] = findings
+            st.session_state["custom_term_review_table"] = edited
 
         review_summary = summarize_review_loop(
             findings,
@@ -276,12 +341,6 @@ def render_detection(profile: RedactionProfile | None) -> None:
             st.warning(review_summary.stop_reason)
         else:
             st.info(review_summary.stop_reason)
-
-        if st.button("Approve all findings"):
-            approve_all_findings(findings)
-            st.session_state["custom_term_findings"] = findings
-            st.session_state["review_complete"] = False
-            st.rerun()
 
         if st.button("Mark review complete", disabled=not review_summary.can_mark_complete):
             st.session_state["review_complete"] = True
