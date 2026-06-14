@@ -339,35 +339,25 @@ if pdf_paths:
 else:
     st.info("Choose PDFs first to add custom detections.")
 
-st.header("4. Confirm replacement map and export")
+st.header("4. Generate ZIP output")
 if review.detections:
     replacement_map = review.export_replacement_map()
     st.caption(f"Replacement map contains {len(replacement_map)} approved item(s). It is hidden by default because it can be long and sensitive.")
     if st.toggle("Show replacement map preview", value=False):
         st.json(replacement_map)
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("Confirm replacement map"):
-            try:
-                review.confirm_replacement_map()
-                map_path, audit_path = write_local_review_artifacts(review, output_dir)
-                st.session_state.review_artifact_paths = [str(map_path), str(audit_path)]
-                st.success("Replacement map confirmed. Use the ZIP download below to save files to your computer.")
-            except Exception as exc:
-                st.error(str(exc))
-    with col2:
-        if st.button("Export approved redacted PDFs"):
-            try:
-                exported = export_reviewed_pdfs(review, output_dir)
-                map_path, audit_path = write_local_review_artifacts(review, output_dir)
-                st.session_state.exported_pdf_paths = [str(path) for path in exported]
-                st.session_state.review_artifact_paths = [str(map_path), str(audit_path)]
-                if exported:
-                    st.success("Exported approved redacted PDFs. Use the ZIP download below to save files to your computer.")
-                else:
-                    st.warning("No anchored approved detections were available for PDF export.")
-            except Exception as exc:
-                st.error(str(exc))
+    if st.button("Generate ZIP download", type="primary"):
+        try:
+            review.confirm_replacement_map()
+            exported = export_reviewed_pdfs(review, output_dir)
+            map_path, audit_path = write_local_review_artifacts(review, output_dir)
+            st.session_state.exported_pdf_paths = [str(path) for path in exported]
+            st.session_state.review_artifact_paths = [str(map_path), str(audit_path)]
+            if exported:
+                st.success("ZIP is ready below. It includes redacted PDFs, replacement map, and audit log.")
+            else:
+                st.warning("ZIP is ready below with the replacement map and audit log. No anchored approved PDF redactions were available.")
+        except Exception as exc:
+            st.error(str(exc))
 
 exported_paths = [Path(path) for path in st.session_state.exported_pdf_paths]
 artifact_paths = [Path(path) for path in st.session_state.review_artifact_paths]
