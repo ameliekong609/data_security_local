@@ -57,6 +57,10 @@ if "detection_warnings" not in st.session_state:
     st.session_state.detection_warnings = []
 if "image_results" not in st.session_state:
     st.session_state.image_results = []
+if "exported_pdf_paths" not in st.session_state:
+    st.session_state.exported_pdf_paths = []
+if "review_artifact_paths" not in st.session_state:
+    st.session_state.review_artifact_paths = []
 
 
 def _write_uploaded_file(temp_root: Path, uploaded) -> Path:
@@ -70,6 +74,29 @@ def _write_uploaded_file(temp_root: Path, uploaded) -> Path:
     temp_path.write_bytes(uploaded.getbuffer())
     return temp_path
 
+
+def _download_file(path: Path, *, label_prefix: str = "Download") -> None:
+    """Render a Streamlit download button for a generated local/server file."""
+
+    if not path.exists():
+        st.warning(f"Output file no longer exists: {path.name}")
+        return
+    mime_by_suffix = {
+        ".pdf": "application/pdf",
+        ".json": "application/json",
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+    }
+    st.download_button(
+        f"{label_prefix} {path.name}",
+        data=path.read_bytes(),
+        file_name=path.name,
+        mime=mime_by_suffix.get(path.suffix.lower(), "application/octet-stream"),
+        key=f"download-{path}",
+    )
+
+
 with st.sidebar:
     st.header("1. Select local files")
     uploads = st.file_uploader(
@@ -79,6 +106,7 @@ with st.sidebar:
         help="Select a directory; PDFs, PNGs, and JPGs in the directory and subdirectories will be uploaded into this session.",
     )
     output_dir = st.text_input("Output folder", "review_outputs")
+    st.caption("On Streamlit Community this folder is inside the cloud session. Use the download buttons after export to save files to your computer.")
 
     if st.button("Detect locally", type="primary"):
         temp_paths = []
@@ -140,7 +168,9 @@ if st.session_state.image_results:
             if result.error:
                 st.warning(f"{result.input_filename}: {result.error}")
             else:
-                st.write(f"{result.input_filename} -> {result.output_filename} ({len(result.redactions)} redaction(s))")
+                output_path = Path(result.output_filename)
+                st.write(f"{result.input_filename} -> {output_path.name} ({len(result.redactions)} redaction(s))")
+                _download_file(output_path, label_prefix="Download image")
 
 if not review.detections:
     st.info("Select PDFs and click 'Detect locally' to begin.")
@@ -302,17 +332,30 @@ if review.detections:
             try:
                 review.confirm_replacement_map()
                 map_path, audit_path = write_local_review_artifacts(review, output_dir)
-                st.success(f"Replacement map confirmed locally: {map_path}\nAudit log: {audit_path}")
+                st.session_state.review_artifact_paths = [str(map_path), str(audit_path)]
+                st.success("Replacement map confirmed. Use the download buttons below to save files to your computer.")
             except Exception as exc:
                 st.error(str(exc))
     with col2:
         if st.button("Export approved redacted PDFs"):
             try:
                 exported = export_reviewed_pdfs(review, output_dir)
-                write_local_review_artifacts(review, output_dir)
+                map_path, audit_path = write_local_review_artifacts(review, output_dir)
+                st.session_state.exported_pdf_paths = [str(path) for path in exported]
+                st.session_state.review_artifact_paths = [str(map_path), str(audit_path)]
                 if exported:
-                    st.success("Exported:\n" + "\n".join(str(path) for path in exported))
+                    st.success("Exported approved redacted PDFs. Use the download buttons below to save files to your computer.")
                 else:
                     st.warning("No anchored approved detections were available for PDF export.")
             except Exception as exc:
                 st.error(str(exc))
+
+exported_paths = [Path(path) for path in st.session_state.exported_pdf_paths]
+artifact_paths = [Path(path) for path in st.session_state.review_artifact_paths]
+if exported_paths or artifact_paths:
+    st.subheader("5. Download outputs")
+    st.caption("In Streamlit Community, generated files live in the cloud session until you download them here.")
+    for path in exported_paths:
+        _download_file(path, label_prefix="Download redacted PDF")
+    for path in artifact_paths:
+        _download_file(path, label_prefix="Download review file")
