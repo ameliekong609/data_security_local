@@ -1,6 +1,8 @@
 from src.detection_models import DetectionCandidate
 from src.review_actions import (
     approve_all_findings,
+    before_after_context,
+    clipped_text,
     set_all_findings_status,
     set_findings_status_by_entity,
 )
@@ -104,3 +106,19 @@ def test_set_findings_status_by_entity_updates_only_matching_entity_type():
 
     assert changed == 1
     assert [finding.status for finding in findings] == ["approved", "pending"]
+
+
+def test_before_after_context_splits_around_match_case_insensitively():
+    before, after = before_after_context(
+        "Client account for Synthetic Alpha Pty Ltd was reviewed",
+        "synthetic alpha pty ltd",
+    )
+
+    assert before == "Client account for"
+    assert after == "was reviewed"
+
+
+def test_clipped_text_collapses_whitespace_and_truncates():
+    value = clipped_text("  Alpha\nBeta   Gamma Delta  ", max_chars=12)
+
+    assert value == "Alpha Beta…"

@@ -8,6 +8,37 @@ from dataclasses import dataclass
 from src.detection_models import DetectionCandidate
 
 
+def clipped_text(value: str, max_chars: int = 80) -> str:
+    """Return a compact one-line snippet for review tables."""
+    normalized = " ".join((value or "").split())
+    if len(normalized) <= max_chars:
+        return normalized
+    return normalized[: max_chars - 1].rstrip() + "…"
+
+
+def before_after_context(
+    context: str,
+    matched_text: str,
+    *,
+    max_chars: int = 80,
+) -> tuple[str, str]:
+    """Split a context string into compact before/after snippets around a match."""
+    normalized_context = " ".join((context or "").split())
+    normalized_match = " ".join((matched_text or "").split())
+    if not normalized_context:
+        return "", ""
+    if not normalized_match:
+        return clipped_text(normalized_context, max_chars), ""
+
+    index = normalized_context.casefold().find(normalized_match.casefold())
+    if index == -1:
+        return clipped_text(normalized_context, max_chars), ""
+
+    before = normalized_context[:index]
+    after = normalized_context[index + len(normalized_match):]
+    return clipped_text(before, max_chars), clipped_text(after, max_chars)
+
+
 @dataclass(frozen=True)
 class ReviewLoopSummary:
     pass_number: int

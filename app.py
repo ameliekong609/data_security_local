@@ -13,6 +13,7 @@ import tempfile
 import streamlit as st
 
 from src.config_loader import default_redaction_config
+from src.review_actions import before_after_context, clipped_text
 from src.review_state import DetectionStatus, ReviewSession
 from src.review_workflow import (
     add_custom_detection_from_pdf,
@@ -175,6 +176,26 @@ else:
         hide_index=True,
         use_container_width=True,
     )
+
+    st.subheader("Context review table")
+    st.caption("Before / Match / After lets reviewers spot-check detections without opening the detailed editor.")
+    context_rows = []
+    for detection in review.detections:
+        before = clipped_text(detection.context_before)
+        after = clipped_text(detection.context_after)
+        if not before and not after:
+            before, after = before_after_context(detection.original_text, detection.original_text)
+        context_rows.append({
+            "File": detection.document_name,
+            "Page": detection.page_label,
+            "Type": detection.entity_type,
+            "Status": detection.status.value,
+            "Before": before,
+            "Match": detection.original_text,
+            "After": after,
+            "Replacement": detection.replacement_label,
+        })
+    st.dataframe(context_rows, hide_index=True, use_container_width=True)
 
     st.subheader("Bulk review")
     bulk_col1, bulk_col2 = st.columns(2)

@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.export_workflow import export_reviewed_pdf
 from src.review_actions import (
     approve_all_findings,
+    before_after_context,
     record_seen_findings,
     set_all_findings_status,
     set_findings_status_by_entity,
@@ -67,12 +68,15 @@ def _open_uploaded_pdf(data: bytes, filename: str) -> fitz.Document | None:
 def _finding_rows(findings: list[ReviewFinding]) -> list[dict[str, object]]:
     rows = []
     for finding in findings:
+        before, after = before_after_context(finding.context, finding.text)
         rows.append({
             "Status": finding.status,
             "File": finding.file_id,
             "Page": finding.page_number + 1,
             "Entity type": finding.entity_type,
+            "Before": before,
             "Detected text": finding.text,
+            "After": after,
             "Replacement": finding.proposed_replacement,
             "Source": finding.source_detector,
             "Confidence": finding.confidence,
@@ -272,6 +276,14 @@ def render_detection(profile: RedactionProfile | None) -> None:
         )
         st.dataframe(grouped, hide_index=True, use_container_width=True)
 
+        st.subheader("Context review table")
+        st.caption("Before / Detected text / After helps reviewers spot-check without opening the detailed editor.")
+        st.dataframe(
+            review_df[["File", "Page", "Entity type", "Status", "Before", "Detected text", "After", "Replacement"]],
+            hide_index=True,
+            use_container_width=True,
+        )
+
         st.subheader("Batch review actions")
         col1, col2, col3 = st.columns(3)
         if col1.button("Approve all current findings"):
@@ -315,7 +327,7 @@ def render_detection(profile: RedactionProfile | None) -> None:
                         required=True,
                     ),
                 },
-                disabled=["File", "Page", "Detected text", "Source", "Confidence"],
+                disabled=["File", "Page", "Before", "Detected text", "After", "Source", "Confidence"],
                 hide_index=True,
                 use_container_width=True,
             )
