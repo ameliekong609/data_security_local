@@ -1,0 +1,45 @@
+{
+  "created_at": "2026-06-13T00:00:00+00:00",
+  "profile_id": "profile_synthetic_mvp_sample",
+  "profile_name": "Synthetic MVP Sample Profile",
+  "terms": [
+    {
+      "created_at": "2026-06-13T00:00:00+00:00",
+      "entity_type": "COMPANY",
+      "notes": "Synthetic fixture only; do not replace with real client data in repo.",
+      "original": "Synthetic Alpha Pty Ltd",
+      "replacement": "[COMPANY_1]",
+      "term_id": "term_synthetic_company_1",
+      "updated_at": "2026-06-13T00:00:00+00:00",
+      "variants": [
+        "Synthetic Alpha",
+        "SYNTHETIC ALPHA PTY LTD"
+      ]
+    },
+    {
+      "created_at": "2026-06-13T00:00:00+00:00",
+      "entity_type": "TRUST",
+      "notes": "Synthetic fixture only.",
+      "original": "Synthetic Growth Trust",
+      "replacement": "[TRUST_1]",
+      "term_id": "term_synthetic_trust_1",
+      "updated_at": "2026-06-13T00:00:00+00:00",
+      "variants": [
+        "SGT"
+      ]
+    },
+    {
+      "created_at": "2026-06-13T00:00:00+00:00",
+      "entity_type": "CLIENT_ID",
+      "notes": "Synthetic fixture only.",
+      "original": "SYN-CLIENT-001",
+      "replacement": "[CLIENT_ID_1]",
+      "term_id": "term_synthetic_client_id_1",
+      "updated_at": "2026-06-13T00:00:00+00:00",
+      "variants": [
+        "Synthetic Client 001"
+      ]
+    }
+  ],
+  "updated_at": "2026-06-13T00:00:00+00:00"
+}

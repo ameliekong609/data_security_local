@@ -1,0 +1,52 @@
+# macOS / editor noise
+.DS_Store
+*.swp
+*.swo
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+.venv*/
+venv/
+
+# Secrets / local runtime config
+.env
+.env.*
+!.env.example
+.claude/
+
+# Local source documents and generated redaction outputs.
+# Keep these out of GitHub even when they are synthetic.
+inputs/
+outputs/
+local_exports/
+config/redaction_rules.yaml
+*.pdf
+*.PDF
+*.docx
+*.pptx
+*.xlsx
+*.xls
+*.csv
+*.zip
+*.jpg
+*.jpeg
+*.png
+*.tif
+*.tiff
+
+# Finder conflict/copy artifacts
+* 2.py
+* 2.md
+* 2.txt
+
+# Local inventory notes can contain source document filenames.
+docs/hermes/m0-inventory-implementation-map.md
