@@ -16,11 +16,12 @@ from src.config_loader import default_redaction_config, load_config
 from src.review_state import DetectionStatus, ReviewSession
 from src.review_workflow import (
     add_custom_detection_from_pdf,
-    build_review_for_pdfs,
     collect_pdf_files,
+    detect_redactions_for_pdf,
     export_reviewed_pdfs,
     write_local_review_artifacts,
 )
+from src.review_state import build_review_session
 
 
 ENTITY_TYPES = [
@@ -49,10 +50,28 @@ if "review" not in st.session_state:
     st.session_state.review = ReviewSession()
 if "pdf_paths" not in st.session_state:
     st.session_state.pdf_paths = []
+if "detection_warnings" not in st.session_state:
+    st.session_state.detection_warnings = []
+
+
+def _write_uploaded_pdf(temp_root: Path, uploaded) -> Path:
+    """Persist an uploaded PDF under a temporary local directory."""
+
+    raw_path = Path(uploaded.name)
+    safe_parts = [part for part in raw_path.parts if part not in {"", ".", ".."}]
+    relative_path = Path(*safe_parts) if safe_parts else Path("uploaded.pdf")
+    temp_path = temp_root / relative_path
+    temp_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path.write_bytes(uploaded.getbuffer())
+    return temp_path
 
 with st.sidebar:
     st.header("1. Select local PDFs")
-    folder = st.text_input("Folder containing PDFs", "")
+    folder = st.text_input(
+        "Optional local folder path",
+        "",
+        help="Use this when the app is running on your own machine. In browser/cloud use, choose a folder below.",
+    )
     explicit_files = st.text_area(
         "Optional PDF paths, one per line",
         help="Use this when files are outside the selected folder.",
@@ -64,9 +83,10 @@ with st.sidebar:
             help="Leave blank to use built-in generic local rules.",
         )
     uploads = st.file_uploader(
-        "Or upload synthetic/local PDFs into a temporary local session",
+        "Or choose a folder of PDFs",
         type=["pdf"],
-        accept_multiple_files=True,
+        accept_multiple_files="directory",
+        help="Select a directory; PDFs in the directory and subdirectories will be uploaded into this session.",
     )
     output_dir = st.text_input("Output folder", "review_outputs")
 
@@ -76,18 +96,27 @@ with st.sidebar:
         if uploads:
             temp_root = Path(tempfile.mkdtemp(prefix="local-review-pdfs-"))
             for uploaded in uploads:
-                temp_path = temp_root / uploaded.name
-                temp_path.write_bytes(uploaded.getbuffer())
-                temp_paths.append(temp_path)
+                temp_paths.append(_write_uploaded_pdf(temp_root, uploaded))
         try:
             pdf_paths = collect_pdf_files(selected + temp_paths, folder or None)
             if not pdf_paths:
                 st.error("No local PDF files selected.")
             else:
                 config = load_config(config_path) if config_path.strip() else default_redaction_config()
+                review = ReviewSession()
+                warnings = []
+                for pdf_path in pdf_paths:
+                    try:
+                        redactions = detect_redactions_for_pdf(pdf_path, config)
+                    except Exception as exc:
+                        warnings.append(f"{pdf_path.name}: {exc}")
+                        continue
+                    review.detections.extend(build_review_session(pdf_path, redactions).detections)
                 st.session_state.pdf_paths = [str(path) for path in pdf_paths]
-                st.session_state.review = build_review_for_pdfs(pdf_paths, config)
-                st.success(f"Detected {len(st.session_state.review.detections)} candidate(s) in {len(pdf_paths)} PDF(s).")
+                st.session_state.review = review
+                st.session_state.detection_warnings = warnings
+                processed_count = len(pdf_paths) - len(warnings)
+                st.success(f"Detected {len(review.detections)} candidate(s) in {processed_count} PDF(s).")
         except Exception as exc:  # Streamlit should show local errors without uploading data.
             st.error(f"Detection failed: {exc}")
 
@@ -95,6 +124,11 @@ review: ReviewSession = st.session_state.review
 pdf_paths = [Path(path) for path in st.session_state.pdf_paths]
 
 st.header("2. Review detections in context")
+if st.session_state.detection_warnings:
+    with st.expander("Skipped files", expanded=True):
+        for warning in st.session_state.detection_warnings:
+            st.warning(warning)
+
 if not review.detections:
     st.info("Select PDFs and click 'Detect locally' to begin.")
 else:

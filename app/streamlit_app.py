@@ -52,6 +52,16 @@ def _split_variants(value: str) -> list[str]:
     return [line.strip() for line in value.splitlines() if line.strip()]
 
 
+def _open_uploaded_pdf(data: bytes, filename: str) -> fitz.Document | None:
+    """Open an uploaded PDF when it is not encrypted."""
+
+    doc = fitz.open(stream=data, filetype="pdf")
+    if doc.is_encrypted and not doc.authenticate(""):
+        doc.close()
+        return None
+    return doc
+
+
 def _finding_rows(findings: list[ReviewFinding]) -> list[dict[str, object]]:
     rows = []
     for finding in findings:
@@ -178,27 +188,49 @@ def render_detection(profile: RedactionProfile | None) -> None:
     if profile is None:
         st.info("Select a profile to enable detection.")
         return
-    uploaded_files = st.file_uploader("Choose local PDF files", type=["pdf"], accept_multiple_files=True)
+    uploaded_files = st.file_uploader(
+        "Choose a folder of local PDFs",
+        type=["pdf"],
+        accept_multiple_files="directory",
+        help="Select a directory; PDFs in the directory and subdirectories will be included.",
+    )
     if not uploaded_files:
         return
     if st.button("Detect custom terms", type="primary"):
         findings: list[ReviewFinding] = []
         uploaded_bytes: dict[str, bytes] = {}
+        skipped_files: list[str] = []
         detector = CustomTermDetector(profile)
         for uploaded in uploaded_files:
             data = uploaded.getvalue()
             uploaded_bytes[uploaded.name] = data
-            doc = fitz.open(stream=data, filetype="pdf")
-            findings.extend(detector.detect_pdf(doc, file_id=uploaded.name))
-            doc.close()
+            try:
+                doc = _open_uploaded_pdf(data, uploaded.name)
+            except Exception as exc:
+                skipped_files.append(f"{uploaded.name}: {exc}")
+                continue
+            if doc is None:
+                skipped_files.append(f"{uploaded.name}: encrypted PDF requires a password")
+                continue
+            try:
+                findings.extend(detector.detect_pdf(doc, file_id=uploaded.name))
+            finally:
+                doc.close()
         previous_seen = set(st.session_state.get("review_seen_keys", set()))
         pass_number = min(int(st.session_state.get("review_pass_number", 0)) + 1, 3)
         st.session_state["custom_term_findings"] = findings
         st.session_state["uploaded_pdf_bytes"] = uploaded_bytes
+        st.session_state["skipped_files"] = skipped_files
         st.session_state["review_pass_number"] = pass_number
         st.session_state["seen_before_current_pass"] = previous_seen
         st.session_state["review_seen_keys"] = record_seen_findings(previous_seen, findings)
         st.session_state["review_complete"] = False
+
+    skipped_files = st.session_state.get("skipped_files", [])
+    if skipped_files:
+        with st.expander("Skipped files", expanded=True):
+            for skipped in skipped_files:
+                st.warning(skipped)
 
     findings = st.session_state.get("custom_term_findings", [])
     if findings:
