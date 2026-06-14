@@ -339,7 +339,7 @@ if pdf_paths:
 else:
     st.info("Choose PDFs first to add custom detections.")
 
-st.header("4. Generate ZIP output")
+st.header("4. Generate and download ZIP")
 if review.detections:
     replacement_map = review.export_replacement_map()
     st.caption(f"Replacement map contains {len(replacement_map)} approved item(s). It is hidden by default because it can be long and sensitive.")
@@ -353,26 +353,25 @@ if review.detections:
             st.session_state.exported_pdf_paths = [str(path) for path in exported]
             st.session_state.review_artifact_paths = [str(map_path), str(audit_path)]
             if exported:
-                st.success("ZIP is ready below. It includes redacted PDFs, replacement map, and audit log.")
+                st.success("ZIP is ready. It includes redacted PDFs, replacement map, and audit log.")
             else:
-                st.warning("ZIP is ready below with the replacement map and audit log. No anchored approved PDF redactions were available.")
+                st.warning("ZIP is ready with the replacement map and audit log. No anchored approved PDF redactions were available.")
         except Exception as exc:
             st.error(str(exc))
 
-exported_paths = [Path(path) for path in st.session_state.exported_pdf_paths]
-artifact_paths = [Path(path) for path in st.session_state.review_artifact_paths]
-output_paths = [path for path in [*exported_paths, *artifact_paths] if path.exists()]
-if exported_paths or artifact_paths:
-    st.subheader("5. Download outputs")
-    st.caption("In Streamlit Community, generated files live in the cloud session until you download this ZIP.")
-    if output_paths:
-        st.download_button(
-            "Download all outputs as ZIP",
-            data=_output_zip(output_paths),
-            file_name="redaction_outputs.zip",
-            mime="application/zip",
-            key="download-redaction-outputs-zip",
-        )
-        st.caption("ZIP includes redacted PDFs, replacement map JSON, and audit JSON.")
-    else:
-        st.warning("Output files no longer exist in this Streamlit session. Export again to regenerate them.")
+    exported_paths = [Path(path) for path in st.session_state.exported_pdf_paths]
+    artifact_paths = [Path(path) for path in st.session_state.review_artifact_paths]
+    output_paths = [path for path in [*exported_paths, *artifact_paths] if path.exists()]
+    if exported_paths or artifact_paths:
+        st.caption("In Streamlit Community, generated files live in the cloud session until you download this ZIP.")
+        if output_paths:
+            st.download_button(
+                "Download all outputs as ZIP",
+                data=_output_zip(output_paths),
+                file_name="redaction_outputs.zip",
+                mime="application/zip",
+                key="download-redaction-outputs-zip",
+            )
+            st.caption("ZIP includes redacted PDFs, replacement map JSON, and audit JSON.")
+        else:
+            st.warning("Output files no longer exist in this Streamlit session. Export again to regenerate them.")
