@@ -42,6 +42,68 @@ class RedactionConfig:
     filename_rules: list[FilenameRule]
 
 
+def default_redaction_config() -> RedactionConfig:
+    """Return generic local rules that do not require a user-supplied config file."""
+
+    return RedactionConfig(
+        client="local",
+        keyword_rules=[],
+        address_rules=[],
+        field_rules={
+            "email": FieldRule(
+                context_patterns=[
+                    r"([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})",
+                ],
+            ),
+            "phone": FieldRule(
+                keep_last=3,
+                context_patterns=[
+                    r"(?:Phone|Mobile|Tel|Telephone|Contact)\s*:?\s*((?:\+?\d[\d ()-]{7,}\d))",
+                ],
+            ),
+            "account_number": FieldRule(
+                keep_last=3,
+                context_patterns=[
+                    r"Account\s*(?:Number|No\.?|#)?\s*:?\s*(\d[\d -]{4,}\d)",
+                    r"ACC(?:OUNT)?\s*:?\s*([A-Z0-9][A-Z0-9 -]{4,}[A-Z0-9])",
+                ],
+            ),
+            "client_id": FieldRule(
+                keep_last=3,
+                context_patterns=[
+                    r"Client\s*ID\s*:?\s*([A-Z0-9][A-Z0-9 -]{4,}[A-Z0-9])",
+                    r"Customer\s*ID\s*:?\s*([A-Z0-9][A-Z0-9 -]{4,}[A-Z0-9])",
+                ],
+            ),
+            "investor_number": FieldRule(
+                keep_last=3,
+                context_patterns=[
+                    r"Investor\s*(?:No\.?|Number|ID)\s*:?\s*([A-Z0-9][A-Z0-9 -]{4,}[A-Z0-9])",
+                ],
+            ),
+            "abn": FieldRule(
+                keep_last=4,
+                context_patterns=[
+                    r"ABN\s*:?\s*(\d{2} ?\d{3} ?\d{3} ?\d{3})",
+                ],
+            ),
+            "tfn": FieldRule(
+                keep_last=3,
+                context_patterns=[
+                    r"TFN\s*:?\s*(\d{3} ?\d{3} ?\d{3})",
+                ],
+            ),
+            "dob": FieldRule(
+                keep_last=4,
+                context_patterns=[
+                    r"(?:DOB|Date of Birth)\s*:?\s*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})",
+                ],
+            ),
+        },
+        filename_rules=[],
+    )
+
+
 def load_config(config_path: str | Path) -> RedactionConfig:
     with open(config_path, "r") as f:
         data = yaml.safe_load(f)

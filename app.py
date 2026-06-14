@@ -12,7 +12,7 @@ import tempfile
 
 import streamlit as st
 
-from src.config_loader import load_config
+from src.config_loader import default_redaction_config, load_config
 from src.review_state import DetectionStatus, ReviewSession
 from src.review_workflow import (
     add_custom_detection_from_pdf,
@@ -52,12 +52,17 @@ if "pdf_paths" not in st.session_state:
 
 with st.sidebar:
     st.header("1. Select local PDFs")
-    config_path = st.text_input("Local redaction config", "config/redaction_rules.yaml")
     folder = st.text_input("Folder containing PDFs", "")
     explicit_files = st.text_area(
         "Optional PDF paths, one per line",
         help="Use this when files are outside the selected folder.",
     )
+    with st.expander("Advanced local config"):
+        config_path = st.text_input(
+            "Optional YAML rule file",
+            "",
+            help="Leave blank to use built-in generic local rules.",
+        )
     uploads = st.file_uploader(
         "Or upload synthetic/local PDFs into a temporary local session",
         type=["pdf"],
@@ -79,7 +84,7 @@ with st.sidebar:
             if not pdf_paths:
                 st.error("No local PDF files selected.")
             else:
-                config = load_config(config_path)
+                config = load_config(config_path) if config_path.strip() else default_redaction_config()
                 st.session_state.pdf_paths = [str(path) for path in pdf_paths]
                 st.session_state.review = build_review_for_pdfs(pdf_paths, config)
                 st.success(f"Detected {len(st.session_state.review.detections)} candidate(s) in {len(pdf_paths)} PDF(s).")
