@@ -24,6 +24,9 @@ from src.review_workflow import (
 from src.review_state import build_review_session
 
 
+SUPPORTED_TYPES = ["pdf", "png", "jpg", "jpeg"]
+IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg"}
+
 ENTITY_TYPES = [
     "person",
     "company",
@@ -52,10 +55,12 @@ if "pdf_paths" not in st.session_state:
     st.session_state.pdf_paths = []
 if "detection_warnings" not in st.session_state:
     st.session_state.detection_warnings = []
+if "image_results" not in st.session_state:
+    st.session_state.image_results = []
 
 
-def _write_uploaded_pdf(temp_root: Path, uploaded) -> Path:
-    """Persist an uploaded PDF under a temporary local directory."""
+def _write_uploaded_file(temp_root: Path, uploaded) -> Path:
+    """Persist an uploaded document under a temporary local directory."""
 
     raw_path = Path(uploaded.name)
     safe_parts = [part for part in raw_path.parts if part not in {"", ".", ".."}]
@@ -66,12 +71,12 @@ def _write_uploaded_pdf(temp_root: Path, uploaded) -> Path:
     return temp_path
 
 with st.sidebar:
-    st.header("1. Select local PDFs")
+    st.header("1. Select local files")
     uploads = st.file_uploader(
-        "Choose a folder of PDFs",
-        type=["pdf"],
+        "Choose a folder of PDFs or images",
+        type=SUPPORTED_TYPES,
         accept_multiple_files="directory",
-        help="Select a directory; PDFs in the directory and subdirectories will be uploaded into this session.",
+        help="Select a directory; PDFs, PNGs, and JPGs in the directory and subdirectories will be uploaded into this session.",
     )
     output_dir = st.text_input("Output folder", "review_outputs")
 
@@ -80,27 +85,43 @@ with st.sidebar:
         if uploads:
             temp_root = Path(tempfile.mkdtemp(prefix="local-review-pdfs-"))
             for uploaded in uploads:
-                temp_paths.append(_write_uploaded_pdf(temp_root, uploaded))
+                temp_paths.append(_write_uploaded_file(temp_root, uploaded))
         try:
             pdf_paths = collect_pdf_files(temp_paths)
-            if not pdf_paths:
-                st.error("No local PDF files selected.")
+            image_paths = [path for path in temp_paths if path.suffix.lower() in IMAGE_SUFFIXES]
+            if not pdf_paths and not image_paths:
+                st.error("No supported local files selected.")
             else:
                 config = default_redaction_config()
                 review = ReviewSession()
                 warnings = []
+                skipped_pdf_count = 0
+                image_results = []
                 for pdf_path in pdf_paths:
                     try:
                         redactions = detect_redactions_for_pdf(pdf_path, config)
                     except Exception as exc:
                         warnings.append(f"{pdf_path.name}: {exc}")
+                        skipped_pdf_count += 1
                         continue
                     review.detections.extend(build_review_session(pdf_path, redactions).detections)
+                for image_path in image_paths:
+                    try:
+                        from src.image_redactor import redact_image
+
+                        image_results.append(redact_image(image_path, Path(output_dir), config))
+                    except Exception as exc:
+                        warnings.append(f"{image_path.name}: image OCR/redaction failed: {exc}")
                 st.session_state.pdf_paths = [str(path) for path in pdf_paths]
                 st.session_state.review = review
                 st.session_state.detection_warnings = warnings
-                processed_count = len(pdf_paths) - len(warnings)
-                st.success(f"Detected {len(review.detections)} candidate(s) in {processed_count} PDF(s).")
+                st.session_state.image_results = image_results
+                processed_count = len(pdf_paths) - skipped_pdf_count
+                successful_images = len([result for result in image_results if not result.error])
+                st.success(
+                    f"Detected {len(review.detections)} PDF candidate(s) in {processed_count} PDF(s). "
+                    f"Processed {successful_images} image(s)."
+                )
         except Exception as exc:  # Streamlit should show local errors without uploading data.
             st.error(f"Detection failed: {exc}")
 
@@ -112,6 +133,14 @@ if st.session_state.detection_warnings:
     with st.expander("Skipped files", expanded=True):
         for warning in st.session_state.detection_warnings:
             st.warning(warning)
+
+if st.session_state.image_results:
+    with st.expander("Image OCR exports", expanded=True):
+        for result in st.session_state.image_results:
+            if result.error:
+                st.warning(f"{result.input_filename}: {result.error}")
+            else:
+                st.write(f"{result.input_filename} -> {result.output_filename} ({len(result.redactions)} redaction(s))")
 
 if not review.detections:
     st.info("Select PDFs and click 'Detect locally' to begin.")
