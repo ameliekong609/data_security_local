@@ -8,7 +8,9 @@ Run locally with:
 from __future__ import annotations
 
 from pathlib import Path
+import io
 import tempfile
+import zipfile
 
 import streamlit as st
 
@@ -97,6 +99,23 @@ def _download_file(path: Path, *, label_prefix: str = "Download") -> None:
     )
 
 
+def _output_zip(paths: list[Path]) -> bytes:
+    """Build an in-memory ZIP containing generated output files."""
+
+    buffer = io.BytesIO()
+    used_names: set[str] = set()
+    with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for path in paths:
+            if not path.exists() or not path.is_file():
+                continue
+            archive_name = path.name
+            if archive_name in used_names:
+                archive_name = f"{path.stem}-{len(used_names) + 1}{path.suffix}"
+            used_names.add(archive_name)
+            archive.write(path, arcname=archive_name)
+    return buffer.getvalue()
+
+
 with st.sidebar:
     st.header("1. Select local files")
     uploads = st.file_uploader(
@@ -106,7 +125,7 @@ with st.sidebar:
         help="Select a directory; PDFs, PNGs, and JPGs in the directory and subdirectories will be uploaded into this session.",
     )
     output_dir = st.text_input("Output folder", "review_outputs")
-    st.caption("On Streamlit Community this folder is inside the cloud session. Use the download buttons after export to save files to your computer.")
+    st.caption("On Streamlit Community this folder is inside the cloud session. Use the ZIP download after export to save files to your computer.")
 
     if st.button("Detect locally", type="primary"):
         temp_paths = []
@@ -333,7 +352,7 @@ if review.detections:
                 review.confirm_replacement_map()
                 map_path, audit_path = write_local_review_artifacts(review, output_dir)
                 st.session_state.review_artifact_paths = [str(map_path), str(audit_path)]
-                st.success("Replacement map confirmed. Use the download buttons below to save files to your computer.")
+                st.success("Replacement map confirmed. Use the ZIP download below to save files to your computer.")
             except Exception as exc:
                 st.error(str(exc))
     with col2:
@@ -344,7 +363,7 @@ if review.detections:
                 st.session_state.exported_pdf_paths = [str(path) for path in exported]
                 st.session_state.review_artifact_paths = [str(map_path), str(audit_path)]
                 if exported:
-                    st.success("Exported approved redacted PDFs. Use the download buttons below to save files to your computer.")
+                    st.success("Exported approved redacted PDFs. Use the ZIP download below to save files to your computer.")
                 else:
                     st.warning("No anchored approved detections were available for PDF export.")
             except Exception as exc:
@@ -352,10 +371,18 @@ if review.detections:
 
 exported_paths = [Path(path) for path in st.session_state.exported_pdf_paths]
 artifact_paths = [Path(path) for path in st.session_state.review_artifact_paths]
+output_paths = [path for path in [*exported_paths, *artifact_paths] if path.exists()]
 if exported_paths or artifact_paths:
     st.subheader("5. Download outputs")
-    st.caption("In Streamlit Community, generated files live in the cloud session until you download them here.")
-    for path in exported_paths:
-        _download_file(path, label_prefix="Download redacted PDF")
-    for path in artifact_paths:
-        _download_file(path, label_prefix="Download review file")
+    st.caption("In Streamlit Community, generated files live in the cloud session until you download this ZIP.")
+    if output_paths:
+        st.download_button(
+            "Download all outputs as ZIP",
+            data=_output_zip(output_paths),
+            file_name="redaction_outputs.zip",
+            mime="application/zip",
+            key="download-redaction-outputs-zip",
+        )
+        st.caption("ZIP includes redacted PDFs, replacement map JSON, and audit JSON.")
+    else:
+        st.warning("Output files no longer exist in this Streamlit session. Export again to regenerate them.")
