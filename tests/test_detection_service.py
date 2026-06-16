@@ -43,7 +43,20 @@ def test_extract_pdf_text_returns_page_text_with_line_offsets(tmp_path):
     assert "Jane Example" in extracted.pages[0].text
 
 
-def test_detect_pdf_pii_returns_review_candidates_for_mvp_entities(tmp_path):
+def test_detect_pdf_pii_uses_presidio_orchestration_for_unprofiled_people(tmp_path):
+    pdf_path = tmp_path / "synthetic-pii.pdf"
+    _write_synthetic_pdf(pdf_path)
+
+    result = detect_pdf_pii(pdf_path)
+
+    person = next(c for c in result.detections if c.entity_type == "PERSON" and c.text == "Jane Example")
+    assert person.source_detector == "presidio"
+    assert person.source_rule == "presidio:PERSON"
+    assert person.proposed_placeholder == "[PERSON_1]"
+    assert person.bounding_box is not None
+
+
+def test_detect_pdf_pii_preserves_deterministic_rules_and_custom_terms(tmp_path):
     pdf_path = tmp_path / "synthetic-pii.pdf"
     _write_synthetic_pdf(pdf_path)
 
