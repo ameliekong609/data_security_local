@@ -45,6 +45,13 @@ if (Test-Path "build") { Remove-Item "build" -Recurse -Force }
 if (Test-Path "dist") { Remove-Item "dist" -Recurse -Force }
 
 & ".\.venv_build\Scripts\python.exe" -m PyInstaller --clean --noconfirm packaging/DataSecurityLocal-Windows.spec
+if ($LASTEXITCODE -ne 0) {
+    throw "PyInstaller failed with exit code $LASTEXITCODE."
+}
+
+if (-not (Test-Path "dist\Data Security Local.exe")) {
+    throw "Expected output was not created: dist\Data Security Local.exe"
+}
 
 Write-Host ""
 Write-Host "Built:"

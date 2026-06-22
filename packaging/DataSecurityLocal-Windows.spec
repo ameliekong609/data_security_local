@@ -6,7 +6,7 @@ import os
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 
-ROOT = Path(SPECPATH).parent.parent
+ROOT = Path.cwd().resolve()
 
 datas = []
 binaries = []
