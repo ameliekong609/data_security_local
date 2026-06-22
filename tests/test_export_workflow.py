@@ -53,6 +53,7 @@ def test_export_reviewed_pdf_only_exports_approved_custom_findings(tmp_path):
     )
 
     assert result.redaction_count == 1
+    assert result.output_pdf.name == "synthetic_custom_redacted.pdf"
     assert result.output_pdf.exists()
     assert result.mapping_json.exists()
     assert result.audit_json.exists()

@@ -2,27 +2,29 @@
 
 Local-first PII redaction MVP for PDF review, custom redaction profiles, pseudonym mapping, and safe export checks.
 
-## Streamlit Community Cloud
+## Local Desktop App
 
-This repo can be deployed as a **synthetic-data demo** on Streamlit Community Cloud.
+This repo is a local-first desktop app for testing on Mac or Windows.
 
-Use this entrypoint:
+Use the launchers:
 
 ```text
-app/streamlit_app.py
+run_local_mac.command
+run_local_windows.bat
 ```
 
-Important privacy rule:
+See [LOCAL_APP.md](LOCAL_APP.md).
 
-- Do not upload real client documents to the Community Cloud deployment.
-- Community Cloud runs on Streamlit-managed servers, so uploaded files are not processed on your local machine.
-- Use the cloud deployment only for synthetic demos and product review.
-- For real client files, run the app locally or inside an approved private environment.
+The app runs on the user's own computer. No Nous Portal or cloud app deployment is required.
+
+For non-technical users, build a packaged app first. See [PACKAGING.md](PACKAGING.md).
 
 ## Local Run
 
+Manual developer run:
+
 ```bash
-python -m streamlit run app/streamlit_app.py
+python desktop_app.py
 ```
 
 ## Tests

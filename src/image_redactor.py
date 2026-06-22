@@ -10,6 +10,8 @@ from src.config_loader import RedactionConfig
 from src.deterministic_redactor import Redaction
 import fitz
 
+from src.ocr_runtime import configure_tesseract
+
 
 @dataclass
 class ImageRedactionResult:
@@ -21,6 +23,7 @@ class ImageRedactionResult:
 
 def _get_ocr_data(image_path: str) -> dict:
     """Run Tesseract OCR and return word-level bounding boxes."""
+    configure_tesseract()
     img = Image.open(image_path)
     data = pytesseract.image_to_data(img, output_type=pytesseract.Output.DICT)
     return data
@@ -141,7 +144,13 @@ def _find_pattern_regions(ocr_data: dict, pattern: str) -> list[tuple]:
     return matches_with_regions
 
 
-def redact_image(image_path: Path, output_dir: Path, config: RedactionConfig) -> ImageRedactionResult:
+def redact_image(
+    image_path: Path,
+    output_dir: Path,
+    config: RedactionConfig,
+    *,
+    output_name: str | None = None,
+) -> ImageRedactionResult:
     """Redact PII from a screenshot/image file."""
     result = ImageRedactionResult(
         input_filename=image_path.name,
@@ -150,6 +159,7 @@ def redact_image(image_path: Path, output_dir: Path, config: RedactionConfig) ->
     )
 
     try:
+        output_dir.mkdir(parents=True, exist_ok=True)
         # OCR the image
         ocr_data = _get_ocr_data(str(image_path))
         img = Image.open(str(image_path))
@@ -249,7 +259,7 @@ def redact_image(image_path: Path, output_dir: Path, config: RedactionConfig) ->
 
         # Rename and save
         from src.file_renamer import rename_file
-        output_name = rename_file(image_path.name, config.filename_rules)
+        output_name = output_name or rename_file(image_path.name, config.filename_rules)
         # Change extension to .png for clean output
         output_name = Path(output_name).stem + ".png"
         output_path = output_dir / output_name

@@ -14,7 +14,7 @@ from src.deterministic_redactor import Redaction
 from src.services.profiles import RedactionProfile
 
 
-# Backwards-compatible name used by the Streamlit review table. The concrete
+# Backwards-compatible name used by the review table. The concrete
 # model is the common detector output shape required by the review workflow.
 ReviewFinding = DetectionCandidate
 

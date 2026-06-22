@@ -16,6 +16,7 @@ def _make_synthetic_pdf(path: Path) -> None:
         "Client: Jane Example\nEmail: jane.example@example.test\nAccount: 123456789",
         fontsize=12,
     )
+    doc.set_metadata({"title": "Jane Example private statement", "author": "Jane Example"})
     doc.save(path)
     doc.close()
 
@@ -72,6 +73,11 @@ def test_redacted_pdf_text_extraction_omits_synthetic_source_strings(tmp_path):
     assert "[PERSON_1]" in extracted_text
     assert "[EMAIL_1]" in extracted_text
     assert "[ACCOUNT_1]" in extracted_text
+
+    redacted_doc = fitz.open(redacted)
+    metadata = redacted_doc.metadata
+    redacted_doc.close()
+    assert "Jane Example" not in json.dumps(metadata)
 
 
 def test_replacement_map_and_privacy_preserving_audit_are_written_locally(tmp_path):

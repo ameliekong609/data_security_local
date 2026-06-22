@@ -2,6 +2,16 @@ import fitz
 from src.deterministic_redactor import Redaction
 
 
+EMPTY_PDF_METADATA = {
+    "title": "",
+    "author": "",
+    "subject": "",
+    "keywords": "",
+    "creator": "",
+    "producer": "",
+}
+
+
 def apply_redactions(pdf_path: str, output_path: str, redactions: list[Redaction], password: str = "") -> int:
     """Apply all redactions to a PDF and save to output_path.
     Returns the number of redactions applied.
@@ -37,6 +47,7 @@ def apply_redactions(pdf_path: str, output_path: str, redactions: list[Redaction
         # Apply all redactions on this page at once
         page.apply_redactions()
 
+    doc.set_metadata(EMPTY_PDF_METADATA)
     doc.save(output_path, garbage=4, deflate=True)
     doc.close()
     return count

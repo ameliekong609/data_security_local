@@ -11,6 +11,7 @@ from typing import Iterable
 import fitz
 
 from src.config_loader import RedactionConfig
+from src.detection_service import CustomTerm, DetectionCandidate, detect_pdf_pii
 from src.deterministic_redactor import (
     Redaction,
     deduplicate_redactions,
@@ -18,7 +19,7 @@ from src.deterministic_redactor import (
     find_keyword_redactions,
 )
 from src.pattern_redactor import find_field_redactions
-from src.review_state import ReviewSession, build_review_session
+from src.review_state import DetectionStatus, ReviewDetection, ReviewSession, build_review_session
 from src.pdf_writer import apply_redactions
 
 
@@ -79,6 +80,55 @@ def build_review_for_pdfs(pdf_paths: list[Path], config: RedactionConfig) -> Rev
         session = build_review_session(pdf_path, redactions)
         combined.detections.extend(session.detections)
     return combined
+
+
+def build_enhanced_review_for_pdf(
+    pdf_path: str | Path,
+    password: str = "",
+    custom_terms: list[CustomTerm] | None = None,
+) -> ReviewSession:
+    """Build review state with the stronger local detection service.
+
+    This path combines regex/context rules and optional local Presidio detection.
+    It is still local-only and produces pending review items for the UI.
+    """
+
+    path = Path(pdf_path)
+    result = detect_pdf_pii(path, password=password, custom_terms=custom_terms or [])
+    review = ReviewSession()
+    for candidate in result.detections:
+        detection = _candidate_to_review_detection(path, candidate)
+        if detection is not None:
+            review.detections.append(detection)
+    return review
+
+
+def _candidate_to_review_detection(pdf_path: Path, candidate: DetectionCandidate) -> ReviewDetection:
+    rect_tuple = None
+    if candidate.bounding_box is not None:
+        rect_tuple = (
+            candidate.bounding_box.x0,
+            candidate.bounding_box.y0,
+            candidate.bounding_box.x1,
+            candidate.bounding_box.y1,
+        )
+    detection_id = hashlib.sha256(
+        f"{pdf_path}|{candidate.page_number}|{candidate.text}|{candidate.entity_type}|{candidate.span.start}".encode("utf-8")
+    ).hexdigest()[:12]
+    return ReviewDetection(
+        detection_id=f"D-{detection_id}",
+        document_path=str(pdf_path),
+        document_name=pdf_path.name,
+        page_num=max(0, candidate.page_number - 1),
+        original_text=candidate.text,
+        entity_type=candidate.entity_type.lower(),
+        replacement_label=candidate.proposed_placeholder,
+        context_before="",
+        context_after=candidate.context,
+        status=DetectionStatus.PENDING,
+        source=candidate.source_detector,
+        rect=rect_tuple,
+    )
 
 
 def add_custom_detection_from_pdf(
@@ -142,9 +192,9 @@ def export_reviewed_pdfs(review: ReviewSession, output_dir: str | Path) -> list[
             continue
         by_document.setdefault(detection.document_path, []).append(detection.to_redaction())
 
-    for document_path, redactions in by_document.items():
+    for document_path, redactions in sorted(by_document.items()):
         source = Path(document_path)
-        target = output_path / f"{source.stem}_redacted{source.suffix}"
+        target = output_path / f"{source.stem}_redacted.pdf"
         apply_redactions(str(source), str(target), redactions)
         exported.append(target)
     return exported

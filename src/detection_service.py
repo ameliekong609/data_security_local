@@ -1,7 +1,7 @@
 """Local-only PDF text extraction and PII detection service.
 
 This module is intentionally UI-free. It provides a small service API that the
-Streamlit/local app can call to extract PDF text and produce pending review
+The local app can call this module to extract PDF text and produce pending review
 candidates for deterministic MVP PII entities.
 """
 
@@ -17,6 +17,11 @@ from pathlib import Path
 from typing import Any, Iterable, Sequence
 
 import fitz
+
+from src.mupdf_runtime import quiet_mupdf_console_output
+
+
+quiet_mupdf_console_output()
 
 
 @dataclass(frozen=True)
@@ -104,30 +109,160 @@ class RegexRule:
 
 REGEX_RULES: tuple[RegexRule, ...] = (
     RegexRule("EMAIL", r"\b([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})\b", "email", 0.98),
-    RegexRule("PHONE", r"(?<!\d)(\+?61\s?4\d{2}\s?\d{3}\s?\d{3}|\+?61\s?[2378]\s?\d{4}\s?\d{4}|0[2378]\s?\d{4}\s?\d{4}|04\d{2}\s?\d{3}\s?\d{3})(?!\d)", "au_phone", 0.9),
-    RegexRule("DOB", r"\b(?:DOB|Date\s+of\s+Birth)\s*[:\-]?\s*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\b", "dob_label", 0.95),
-    RegexRule("ABN", r"\bABN\s*[:\-]?\s*(\d{2}\s?\d{3}\s?\d{3}\s?\d{3})\b", "abn_like", 0.92),
-    RegexRule("TFN", r"\b(?:TFN|Tax\s+File\s+Number)\s*[:\-]?\s*(\d{3}\s?\d{3}\s?\d{3})\b", "tfn_label", 0.95),
-    RegexRule("ACCOUNT", r"\b(?:Account(?:\s+Number|\s+No\.?|\s+#)?|Acct)\s*[:\-]?\s*([A-Z0-9][A-Z0-9 -]{5,}[A-Z0-9])\b", "account_label", 0.9),
-    RegexRule("INVESTOR_ID", r"\b(?:Investor\s*(?:No\.?|Number|ID)|Investment\s+ID)\s*[:\-]?\s*([A-Z]{0,4}\d[A-Z0-9-]{3,})\b", "investor_id_label", 0.92),
-    RegexRule("CLIENT_ID", r"\b(?:Client\s*(?:ID|No\.?|Number)|Customer\s*ID)\s*[:\-]?\s*([A-Z]{1,5}-?\d[A-Z0-9-]{3,})\b", "client_id_label", 0.92),
-    RegexRule("ADDRESS", r"\b(\d{1,5}[A-Z]?[/\-]?\d*\s+[A-Z][A-Z .'\-]+(?:Street|St|Road|Rd|Avenue|Ave|Drive|Dr|Lane|Ln|Court|Ct|Place|Pl|Boulevard|Blvd|Parade|Pde|Terrace|Tce)\b[^\n,]*(?:,?\s+[A-Z][A-Za-z .'\-]+\s+(?:NSW|VIC|QLD|SA|WA|TAS|ACT|NT)\s+\d{4})?)", "au_address_like", 0.78),
+    RegexRule("ACCOUNT", r"\b(?:Account\b(?:\s+Number|\s+No\.?|\s+#)?|Acct\b)\s*[:\-]?\s*([A-Z0-9][A-Z0-9 -]{5,}[A-Z0-9])\b", "account_label", 0.9),
     RegexRule("COMPANY", r"\b([A-Z][A-Za-z0-9 &'.,\-]+?\s+(?:Pty\s+Ltd|Limited|Ltd|Company))\b", "company_suffix", 0.82),
     RegexRule("TRUST", r"\bATF\s+([A-Z][A-Za-z0-9 &'.,\-]+?\s+Trust)\b", "trust_suffix", 0.82),
-    RegexRule("PERSON", r"\b(?:Mr|Mrs|Ms|Miss|Dr)\s+([A-Z][A-Za-z'\-]+\s+[A-Z][A-Za-z'\-]+)\b", "honorific_person", 0.7),
+    RegexRule("PERSON", r"\b((?:Mr|Mrs|Ms|Miss|Dr)\.?\s+[A-Z][A-Za-z'\-]+(?:\s+[A-Z][A-Za-z'\-]+){1,2})\b", "honorific_person", 0.8),
 )
 
-PRESIDIO_ENTITY_MAP: dict[str, str] = {
-    "EMAIL_ADDRESS": "EMAIL",
-    "PHONE_NUMBER": "PHONE",
-    "PERSON": "PERSON",
-    "LOCATION": "ADDRESS",
-    "URL": "URL",
-    "DATE_TIME": "DATE",
-    "US_BANK_NUMBER": "ACCOUNT",
-    "CREDIT_CARD": "ACCOUNT",
-    "IBAN_CODE": "ACCOUNT",
+PUBLIC_INSTITUTION_NAME_KEYWORDS = (
+    "anz",
+    "australia and new zealand banking",
+    "bank of america",
+    "bank of queensland",
+    "bendigo bank",
+    "citibank",
+    "commonwealth bank",
+    "commbank",
+    "hsbc",
+    "ing bank",
+    "j.p. morgan",
+    "jp morgan",
+    "macquarie bank",
+    "morgan stanley",
+    "national australia bank",
+    "nab",
+    "st george bank",
+    "suncorp bank",
+    "ubank",
+    "ubs",
+    "westpac",
+)
+
+PUBLIC_INSTITUTION_EMAIL_DOMAIN_KEYWORDS = (
+    "anz",
+    "bankofamerica",
+    "boq",
+    "citibank",
+    "commbank",
+    "commonwealthbank",
+    "hsbc",
+    "ing",
+    "jpmorgan",
+    "macquarie",
+    "nab",
+    "stgeorge",
+    "suncorp",
+    "ubank",
+    "ubs",
+    "westpac",
+)
+
+PUBLIC_SERVICE_EMAIL_LOCAL_PARTS = (
+    "admin",
+    "contact",
+    "customer",
+    "customerservice",
+    "enquiries",
+    "info",
+    "investor",
+    "investorservices",
+    "mail",
+    "noreply",
+    "no-reply",
+    "notifications",
+    "registry",
+    "service",
+    "statements",
+    "support",
+)
+
+TRANSACTION_DESCRIPTION_KEYWORDS = (
+    "atm",
+    "bp payment",
+    "cash deposit",
+    "cash interest",
+    "cash withdrawal",
+    "cheque deposit",
+    "debit card",
+    "direct debit",
+    "eftpos",
+    "interest",
+    "payment",
+    "purchase",
+    "request",
+    "transfer",
+    "withdrawal",
+)
+
+PUBLIC_PERSON_FALSE_POSITIVES = {
+    "afca",
+    "automic",
+    "closing balance",
+    "distribution",
+    "download",
+    "fee",
+    "fees",
+    "kpmg austr",
+    "link market services",
+    "linkmarketservices",
+    "netbank",
+    "noteholders",
+    "portfolio",
+    "privacy statement",
+    "reply paid",
+    "securityholder reference number",
+    "sydney",
+    "westpac",
 }
+
+PUBLIC_PERSON_KEYWORDS = (
+    "balance",
+    "bank",
+    "distribution",
+    "download",
+    "fee",
+    "fees",
+    "number",
+    "paid",
+    "portfolio",
+    "privacy",
+    "reference",
+    "reply",
+    "securityholder",
+    "statement",
+)
+
+COMPANY_VARIANT_STOPWORDS = {
+    "a",
+    "ac",
+    "account",
+    "and",
+    "australia",
+    "australian",
+    "co",
+    "company",
+    "fund",
+    "holdings",
+    "limited",
+    "ltd",
+    "pty",
+    "the",
+    "trust",
+}
+
+COMPANY_VARIANT_BOUNDARY_WORDS = {
+    "a/c",
+    "ac",
+    "account",
+    "pty",
+    "ltd",
+    "limited",
+    "trust",
+    "fund",
+}
+
+PRESIDIO_ENTITY_MAP: dict[str, str] = {"PERSON": "PERSON"}
 
 
 def extract_pdf_text(pdf_path: str | Path, *, password: str | None = None) -> ExtractedDocumentText:
@@ -191,7 +326,7 @@ def _detect_custom_terms(
         for value, entity_type, source_rule in term_values:
             if not value:
                 continue
-            pattern = re.compile(re.escape(value), re.IGNORECASE)
+            pattern = _literal_term_pattern(value)
             for page in extracted.pages:
                 for match in pattern.finditer(page.text):
                     candidates.append(
@@ -209,7 +344,56 @@ def _detect_custom_terms(
                             _first_bounding_box(doc[page.page_number - 1], match.group(0)),
                         )
                     )
+        candidates.extend(_detect_company_variants(extracted, doc, term, original_replacement))
     return candidates
+
+
+def _detect_company_variants(
+    extracted: ExtractedDocumentText,
+    doc: fitz.Document,
+    term: CustomTerm,
+    replacement: str,
+) -> list[DetectionCandidate]:
+    """Find close account-name variants for known company/custom entities.
+
+    Example: a user enters "TEDA FINANCIAL PTY LTD" and the PDF contains
+    "<TEDA AUSTRALIA FINANCIAL A/C>". Exact matching misses this, but the shared
+    distinctive tokens are enough to raise it for review.
+    """
+
+    if term.entity_type.upper() not in {"COMPANY", "CUSTOM", "TRUST"}:
+        return []
+
+    important_tokens = _important_company_tokens(term.original)
+    if not important_tokens:
+        return []
+
+    candidates: list[DetectionCandidate] = []
+    for page in extracted.pages:
+        for start, end, text in _company_variant_windows(page.text):
+            normalized_tokens = set(_company_tokens(text))
+            if _company_variant_matches(important_tokens, normalized_tokens):
+                candidates.append(
+                    _candidate_from_match(
+                        extracted.file_id,
+                        page,
+                        start,
+                        end,
+                        text,
+                        term.entity_type.upper(),
+                        0.96,
+                        "custom_term",
+                        f"custom_variant_auto:{term.original}",
+                        replacement,
+                        _first_bounding_box(doc[page.page_number - 1], text),
+                    )
+                )
+    return candidates
+
+
+def _literal_term_pattern(value: str) -> re.Pattern[str]:
+    pieces = [re.escape(piece) for piece in re.split(r"\s+", value.strip()) if piece]
+    return re.compile(r"\s+".join(pieces), re.IGNORECASE)
 
 
 def _detect_regex_rules(extracted: ExtractedDocumentText, doc: fitz.Document) -> list[DetectionCandidate]:
@@ -219,7 +403,7 @@ def _detect_regex_rules(extracted: ExtractedDocumentText, doc: fitz.Document) ->
             for match in re.finditer(rule.pattern, page.text, rule.flags):
                 group_index = rule.group if match.lastindex else 0
                 text = match.group(group_index).strip()
-                if not text or _looks_like_public_service_email(text):
+                if not text or _looks_like_public_entity(rule.entity_type, text):
                     continue
                 start, end = match.span(group_index)
                 candidates.append(
@@ -267,7 +451,7 @@ def _detect_presidio_entities(extracted: ExtractedDocumentText, doc: fitz.Docume
             if not entity_type:
                 continue
             text = page.text[result.start:result.end].strip()
-            if not text or (entity_type == "EMAIL" and _looks_like_public_service_email(text)):
+            if not text or _looks_like_public_entity(entity_type, text):
                 continue
             candidates.append(
                 _candidate_from_match(
@@ -302,6 +486,8 @@ def _presidio_context_label_candidates(
     candidates: list[DetectionCandidate] = []
     for match in re.finditer(r"\b(?:Client|Investor|Name)\s*[:\-]\s*([A-Z][A-Za-z'\-]+[ \t]+[A-Z][A-Za-z'\-]+)\b", page.text):
         text = match.group(1).strip()
+        if _looks_like_public_entity("PERSON", text):
+            continue
         start, end = match.span(1)
         candidates.append(
             _candidate_from_match(
@@ -319,6 +505,58 @@ def _presidio_context_label_candidates(
             )
         )
     return candidates
+
+
+def _important_company_tokens(value: str) -> set[str]:
+    tokens = set(_company_tokens(value))
+    important = {token for token in tokens if token not in COMPANY_VARIANT_STOPWORDS and len(token) >= 3}
+    if important:
+        return important
+    return {token for token in tokens if len(token) >= 4}
+
+
+def _company_tokens(value: str) -> list[str]:
+    normalized = value.lower().replace("a/c", " ac ")
+    return re.findall(r"[a-z0-9]+", normalized)
+
+
+def _company_variant_windows(text: str) -> list[tuple[int, int, str]]:
+    windows: list[tuple[int, int, str]] = []
+
+    for match in re.finditer(r"<([^>\n]{4,120})>", text):
+        inner = match.group(1).strip()
+        if inner:
+            windows.append((match.start(1), match.end(1), inner))
+
+    for line_match in re.finditer(r"(?m)^[^\n]{4,140}$", text):
+        line = line_match.group(0).strip()
+        if not line:
+            continue
+        words = line.split()
+        for start_index in range(len(words)):
+            for end_index in range(start_index + 2, min(len(words), start_index + 8) + 1):
+                phrase = " ".join(words[start_index:end_index]).strip(" \t:;,.")
+                if len(phrase) < 4:
+                    continue
+                if "<" in phrase or ">" in phrase:
+                    continue
+                phrase_start = line_match.start() + line.find(words[start_index])
+                phrase_end = phrase_start + len(phrase)
+                windows.append((phrase_start, phrase_end, phrase))
+    return windows
+
+
+def _company_variant_matches(important_tokens: set[str], candidate_tokens: set[str]) -> bool:
+    if not important_tokens or not candidate_tokens:
+        return False
+    shared = important_tokens & candidate_tokens
+    if len(shared) >= 2:
+        return True
+    if len(shared) == 1:
+        distinctive = next(iter(shared))
+        has_boundary = bool(candidate_tokens & COMPANY_VARIANT_BOUNDARY_WORDS)
+        return len(distinctive) >= 5 and has_boundary
+    return False
 
 
 @lru_cache(maxsize=1)
@@ -406,14 +644,30 @@ def _deduplicate_candidates(candidates: Iterable[DetectionCandidate]) -> list[De
             existing
             for existing in result
             if existing.page_number == candidate.page_number
-            and existing.entity_type == candidate.entity_type
             and not (candidate.span.end <= existing.span.start or candidate.span.start >= existing.span.end)
         ]
         if not overlaps:
             result.append(candidate)
             continue
-        best_existing = max(overlaps, key=lambda c: (c.confidence, c.span.end - c.span.start))
-        if candidate.confidence > best_existing.confidence and candidate.source_detector == "custom_term":
+        best_existing = min(
+            overlaps,
+            key=lambda c: (
+                _source_priority(c.source_detector),
+                -c.confidence,
+                -(c.span.end - c.span.start),
+            ),
+        )
+        candidate_rank = (
+            _source_priority(candidate.source_detector),
+            -candidate.confidence,
+            -(candidate.span.end - candidate.span.start),
+        )
+        existing_rank = (
+            _source_priority(best_existing.source_detector),
+            -best_existing.confidence,
+            -(best_existing.span.end - best_existing.span.start),
+        )
+        if candidate_rank < existing_rank:
             result = [existing for existing in result if existing not in overlaps]
             result.append(candidate)
     return sorted(result, key=lambda c: (c.page_number, c.span.start, c.span.end, c.entity_type))
@@ -449,9 +703,78 @@ def _default_placeholder(entity_type: str, index: int) -> str:
     return f"[{entity_type.upper()}_{index}]"
 
 
+def _looks_like_public_entity(entity_type: str, text: str) -> bool:
+    if entity_type == "ADDRESS":
+        return _looks_like_transaction_description(text)
+    if entity_type == "EMAIL":
+        return _looks_like_public_service_email(text)
+    if entity_type == "ACCOUNT":
+        return not _looks_like_account_value(text)
+    if entity_type == "COMPANY":
+        return _looks_like_public_institution_name(text)
+    if entity_type == "PERSON":
+        return _looks_like_public_or_nonhuman_person(text)
+    return False
+
+
+def _looks_like_account_value(text: str) -> bool:
+    value = text.strip()
+    digits = re.sub(r"\D", "", value)
+    compact = re.sub(r"[^A-Za-z0-9]", "", value)
+    if len(digits) < 5:
+        return False
+    if len(compact) > 32:
+        return False
+    words = re.findall(r"[A-Za-z]+", value)
+    if len(words) > 2 and len(digits) < 8:
+        return False
+    return True
+
+
+def _looks_like_transaction_description(text: str) -> bool:
+    value = re.sub(r"\s+", " ", text.lower()).strip()
+    return any(keyword in value for keyword in TRANSACTION_DESCRIPTION_KEYWORDS)
+
+
+def _looks_like_public_institution_name(text: str) -> bool:
+    normalized = re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+    return any(keyword in normalized for keyword in PUBLIC_INSTITUTION_NAME_KEYWORDS)
+
+
+def _looks_like_public_or_nonhuman_person(text: str) -> bool:
+    value = text.strip()
+    normalized = re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
+    compact = re.sub(r"[^a-z0-9]+", "", value.lower())
+    if not normalized:
+        return True
+    if any(ch.isdigit() for ch in value):
+        return True
+    if "." in value or "/" in value or "www" in normalized:
+        return True
+    if normalized in PUBLIC_PERSON_FALSE_POSITIVES or compact in PUBLIC_PERSON_FALSE_POSITIVES:
+        return True
+    if any(keyword in normalized for keyword in PUBLIC_PERSON_KEYWORDS):
+        return True
+    tokens = normalized.split()
+    if len(tokens) == 1 and len(tokens[0]) <= 3:
+        return True
+    if len(tokens) > 4:
+        return True
+    return False
+
+
 def _looks_like_public_service_email(text: str) -> bool:
-    # Keep the service conservative: app-specific allow lists can be layered later.
-    return text.lower().endswith(("@example.com", "@example.org"))
+    value = text.lower()
+    if value.endswith(("@example.com", "@example.org")):
+        return True
+    if "@" not in value:
+        return False
+    local_part, domain = value.rsplit("@", 1)
+    compact_domain = re.sub(r"[^a-z0-9]+", "", domain)
+    compact_local = re.sub(r"[^a-z0-9-]+", "", local_part)
+    if compact_local in PUBLIC_SERVICE_EMAIL_LOCAL_PARTS:
+        return True
+    return any(keyword in compact_domain for keyword in PUBLIC_INSTITUTION_EMAIL_DOMAIN_KEYWORDS)
 
 
 def _to_jsonable(result: DetectionResult) -> dict:

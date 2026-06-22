@@ -1,7 +1,7 @@
 """Reusable review-state models and services for local PII review workflows.
 
-The Streamlit UI should orchestrate these classes instead of storing review
-business rules only in session state. All data is local and designed for
+The UI layer should orchestrate these classes instead of storing review
+business rules in view-specific state. All data is local and designed for
 synthetic tests or user-selected local documents.
 """
 

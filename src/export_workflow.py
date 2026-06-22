@@ -73,7 +73,7 @@ def export_reviewed_pdf(
 
 
 def _safe_stem(filename: str) -> str:
-    stem = Path(filename).stem.strip() or "redacted"
+    stem = Path(filename).stem.strip() or "document"
     return "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in stem)
 
 
