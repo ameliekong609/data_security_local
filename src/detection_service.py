@@ -110,7 +110,7 @@ class RegexRule:
 REGEX_RULES: tuple[RegexRule, ...] = (
     RegexRule("EMAIL", r"\b([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})\b", "email", 0.98),
     RegexRule("ACCOUNT", r"\b(?:Account\b(?:\s+Number|\s+No\.?|\s+#)?|Acct\b)\s*[:\-]?\s*([A-Z0-9][A-Z0-9 -]{5,}[A-Z0-9])\b", "account_label", 0.9),
-    RegexRule("COMPANY", r"\b([A-Z][A-Za-z0-9 &'.,\-]+?\s+(?:Pty\s+Ltd|Limited|Ltd|Company))\b", "company_suffix", 0.82),
+    RegexRule("COMPANY", r"\b([A-Z][A-Za-z0-9 &'.,\-]+?\s+(?:Pty\s+Ltd|Limited|Ltd))\b", "company_suffix", 0.82),
     RegexRule("TRUST", r"\bATF\s+([A-Z][A-Za-z0-9 &'.,\-]+?\s+Trust)\b", "trust_suffix", 0.82),
     RegexRule("PERSON", r"\b((?:Mr|Mrs|Ms|Miss|Dr)\.?\s+[A-Z][A-Za-z'\-]+(?:\s+[A-Z][A-Za-z'\-]+){1,2})\b", "honorific_person", 0.8),
 )

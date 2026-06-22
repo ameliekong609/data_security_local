@@ -13,6 +13,8 @@ from typing import Any
 import json
 import re
 import shutil
+import sys
+import tempfile
 import zipfile
 
 import webview
@@ -21,6 +23,7 @@ from src.config_loader import default_redaction_config
 from src.detection_service import CustomTerm
 from src.image_redactor import redact_image
 from src.mupdf_runtime import quiet_mupdf_console_output
+from src.ocr_runtime import _find_tesseract_executable, configure_tesseract
 from src.review_state import DetectionStatus, ReviewSession
 from src.review_workflow import (
     add_custom_detection_from_pdf,
@@ -885,6 +888,8 @@ Tenet Legacy Pty Ltd | company
 
 def main() -> None:
     quiet_mupdf_console_output()
+    if "--self-test" in sys.argv:
+        raise SystemExit(_self_test())
     api = DesktopApi()
     window = webview.create_window(
         "Data Security Local",
@@ -896,6 +901,59 @@ def main() -> None:
     )
     api.window = window
     webview.start(debug=False)
+
+
+def _self_test() -> int:
+    """Run a packaged-app smoke test without opening the GUI."""
+
+    import fitz
+    import pytesseract
+
+    from src.detection_service import CustomTerm, detect_pdf_pii
+
+    quiet_mupdf_console_output()
+    configure_tesseract()
+
+    if getattr(sys, "frozen", False):
+        tesseract = _find_tesseract_executable()
+        if tesseract is None:
+            print("SELF_TEST_FAILED: bundled Tesseract was not found")
+            return 1
+        try:
+            version = pytesseract.get_tesseract_version()
+        except Exception as exc:
+            print(f"SELF_TEST_FAILED: bundled Tesseract could not run: {exc}")
+            return 1
+        print(f"SELF_TEST_TESSERACT={version}")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        pdf_path = Path(tmpdir) / "self-test.pdf"
+        doc = fitz.open()
+        page = doc.new_page()
+        page.insert_text(
+            (72, 72),
+            "Client: Wei Wang\nCompany: Example Pty Ltd\nAccount Number: 123456789\nEmail: wei@example.test",
+            fontsize=12,
+        )
+        doc.save(pdf_path)
+        doc.close()
+
+        result = detect_pdf_pii(
+            pdf_path,
+            custom_terms=[
+                CustomTerm(original="Wei Wang", entity_type="PERSON", replacement_label="[PERSON_1]"),
+                CustomTerm(original="Example Pty Ltd", entity_type="COMPANY", replacement_label="[COMPANY_1]"),
+            ],
+        )
+        detected_types = {candidate.entity_type for candidate in result.detections}
+        required = {"PERSON", "COMPANY", "ACCOUNT", "EMAIL"}
+        missing = required - detected_types
+        if missing:
+            print(f"SELF_TEST_FAILED: missing detections {sorted(missing)}")
+            return 1
+
+    print("SELF_TEST_OK")
+    return 0
 
 
 if __name__ == "__main__":

@@ -53,6 +53,12 @@ if (-not (Test-Path "dist\Data Security Local.exe")) {
     throw "Expected output was not created: dist\Data Security Local.exe"
 }
 
+Write-Host "Running packaged app self-test..."
+& "dist\Data Security Local.exe" --self-test
+if ($LASTEXITCODE -ne 0) {
+    throw "Packaged app self-test failed with exit code $LASTEXITCODE."
+}
+
 Write-Host ""
 Write-Host "Built:"
 Write-Host "  dist\Data Security Local.exe"

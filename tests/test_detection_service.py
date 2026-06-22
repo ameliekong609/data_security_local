@@ -356,3 +356,22 @@ def test_custom_name_term_matches_inside_title_with_flexible_spacing(tmp_path):
 
     assert "WEI   WANG" in custom_texts
     assert "SIMIAO ZHANG" in custom_texts
+
+
+def test_company_detector_does_not_treat_company_label_as_name_suffix(tmp_path):
+    pdf_path = tmp_path / "company-label.pdf"
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text(
+        (72, 72),
+        "Client: Wei Wang\nCompany: Example Pty Ltd",
+        fontsize=12,
+    )
+    doc.save(pdf_path)
+    doc.close()
+
+    result = detect_pdf_pii(pdf_path)
+    company_texts = {candidate.text for candidate in result.detections if candidate.entity_type == "COMPANY"}
+
+    assert "Example Pty Ltd" in company_texts
+    assert "Wei Wang\nCompany" not in company_texts
