@@ -147,3 +147,17 @@ def test_approve_detection_approves_matching_original_text(tmp_path: Path):
     assert statuses["Wei Wang"] == "approved"
     assert second.status == DetectionStatus.APPROVED
     assert other.status == DetectionStatus.APPROVED
+
+
+def test_open_output_folder_uses_windows_startfile(tmp_path: Path, monkeypatch):
+    opened = []
+    api = DesktopApi()
+    api.output_dir = tmp_path / "exports"
+    monkeypatch.setattr("sys.platform", "win32")
+    monkeypatch.setattr("os.startfile", lambda path: opened.append(path), raising=False)
+
+    state = api.open_output_folder()
+
+    assert api.output_dir.is_dir()
+    assert opened == [str(api.output_dir)]
+    assert state["warnings"] == []

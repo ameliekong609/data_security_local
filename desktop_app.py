@@ -11,6 +11,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 import json
+import os
 import re
 import shutil
 import sys
@@ -292,8 +293,9 @@ class DesktopApi:
     def open_output_folder(self) -> dict[str, Any]:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         try:
-            webview.windows[0].evaluate_js(f"console.log({json.dumps(str(self.output_dir))})")
-            if shutil.which("open"):
+            if sys.platform.startswith("win"):
+                os.startfile(str(self.output_dir))  # type: ignore[attr-defined]
+            elif shutil.which("open"):
                 import subprocess
 
                 subprocess.Popen(["open", str(self.output_dir)])
@@ -301,6 +303,8 @@ class DesktopApi:
                 import subprocess
 
                 subprocess.Popen(["explorer", str(self.output_dir)])
+            else:
+                self.warnings.append(f"Output folder is ready: {self.output_dir}")
         except Exception as exc:
             self.warnings.append(f"Could not open output folder: {exc}")
         return self.state()
