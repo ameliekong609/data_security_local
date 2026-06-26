@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
+import base64
 import json
 import os
 import re
@@ -46,6 +47,43 @@ def _file_dialog_kind(name: str) -> Any:
     return getattr(webview, f"{name}_DIALOG")
 
 
+def _native_choose_files() -> tuple[str, ...]:
+    import tkinter as tk
+    from tkinter import filedialog
+
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes("-topmost", True)
+    root.update()
+    try:
+        return filedialog.askopenfilenames(
+            title="Choose PDFs/images",
+            filetypes=[
+                ("Documents", "*.pdf *.png *.jpg *.jpeg"),
+                ("PDF files", "*.pdf"),
+                ("Image files", "*.png *.jpg *.jpeg"),
+                ("All files", "*.*"),
+            ],
+        )
+    finally:
+        root.destroy()
+
+
+def _native_choose_folder(title: str) -> tuple[str, ...]:
+    import tkinter as tk
+    from tkinter import filedialog
+
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes("-topmost", True)
+    root.update()
+    try:
+        path = filedialog.askdirectory(title=title)
+        return (path,) if path else ()
+    finally:
+        root.destroy()
+
+
 class DesktopApi:
     def __init__(self) -> None:
         self.window: webview.Window | None = None
@@ -56,23 +94,16 @@ class DesktopApi:
         self.warnings: list[str] = []
         self.exported_paths: list[Path] = []
         self.known_terms_text = ""
+        self.upload_dir = Path(tempfile.mkdtemp(prefix="data_security_local_uploads_"))
 
     def choose_files(self) -> dict[str, Any]:
-        if self.window is None:
-            return self._error("Desktop window is not ready.")
-        paths = self.window.create_file_dialog(
-            _file_dialog_kind("OPEN"),
-            allow_multiple=True,
-            file_types=("Documents (*.pdf;*.png;*.jpg;*.jpeg)", "All files (*.*)"),
-        )
+        paths = self._choose_file_paths()
         if paths:
             self.selected_files = self._supported_files(Path(path) for path in paths)
         return self.state()
 
     def choose_folder(self) -> dict[str, Any]:
-        if self.window is None:
-            return self._error("Desktop window is not ready.")
-        paths = self.window.create_file_dialog(_file_dialog_kind("FOLDER"))
+        paths = self._choose_folder_paths("Choose folder")
         if paths:
             root = Path(paths[0])
             self.selected_files = self._supported_files(
@@ -81,12 +112,67 @@ class DesktopApi:
         return self.state()
 
     def choose_output_folder(self) -> dict[str, Any]:
-        if self.window is None:
-            return self._error("Desktop window is not ready.")
-        paths = self.window.create_file_dialog(_file_dialog_kind("FOLDER"))
+        paths = self._choose_folder_paths("Choose output folder")
         if paths:
             self.output_dir = Path(paths[0]).resolve()
         return self.state()
+
+    def upload_files(self, files: list[dict[str, str]]) -> dict[str, Any]:
+        saved_paths: list[Path] = []
+        self.upload_dir.mkdir(parents=True, exist_ok=True)
+        for index, item in enumerate(files, start=1):
+            filename = Path(item.get("name", f"file_{index}")).name
+            suffix = Path(filename).suffix.lower()
+            if suffix not in SUPPORTED_SUFFIXES:
+                self.warnings.append(f"Skipped unsupported file: {filename}")
+                continue
+            data_url = item.get("data_url", "")
+            if "," not in data_url:
+                self.warnings.append(f"Could not read selected file: {filename}")
+                continue
+            try:
+                raw_bytes = base64.b64decode(data_url.split(",", 1)[1], validate=True)
+            except Exception as exc:
+                self.warnings.append(f"Could not decode selected file {filename}: {exc}")
+                continue
+            target = self._unique_upload_path(filename)
+            target.write_bytes(raw_bytes)
+            saved_paths.append(target)
+
+        if saved_paths:
+            self.selected_files = self._supported_files(saved_paths)
+            self.warnings.append(f"Loaded {len(self.selected_files)} local file(s).")
+        return self.state()
+
+    def _choose_file_paths(self) -> tuple[str, ...]:
+        if sys.platform.startswith("win"):
+            return _native_choose_files()
+        if self.window is None:
+            self.warnings.append("Desktop window is not ready.")
+            return ()
+        try:
+            paths = self.window.create_file_dialog(
+                _file_dialog_kind("OPEN"),
+                allow_multiple=True,
+                file_types=("Documents (*.pdf;*.png;*.jpg;*.jpeg)", "All files (*.*)"),
+            )
+            return tuple(paths or ())
+        except Exception as exc:
+            self.warnings.append(f"File picker failed: {exc}")
+            return _native_choose_files()
+
+    def _choose_folder_paths(self, title: str) -> tuple[str, ...]:
+        if sys.platform.startswith("win"):
+            return _native_choose_folder(title)
+        if self.window is None:
+            self.warnings.append("Desktop window is not ready.")
+            return ()
+        try:
+            paths = self.window.create_file_dialog(_file_dialog_kind("FOLDER"))
+            return tuple(paths or ())
+        except Exception as exc:
+            self.warnings.append(f"Folder picker failed: {exc}")
+            return _native_choose_folder(title)
 
     def set_known_terms(self, raw_terms: str) -> dict[str, Any]:
         self.known_terms_text = raw_terms
@@ -398,6 +484,17 @@ class DesktopApi:
                 supported.append(resolved)
         return sorted(dict.fromkeys(supported))
 
+    def _unique_upload_path(self, filename: str) -> Path:
+        safe_name = re.sub(r"[^A-Za-z0-9._ -]+", "_", Path(filename).name).strip() or "upload"
+        candidate = self.upload_dir / safe_name
+        if not candidate.exists():
+            return candidate
+        for index in range(2, 10_000):
+            candidate = self.upload_dir / f"{Path(safe_name).stem}_{index}{Path(safe_name).suffix}"
+            if not candidate.exists():
+                return candidate
+        raise ValueError(f"Could not create a unique upload filename for {filename}")
+
     def _write_zip(self, zip_path: Path, paths: list[Path]) -> None:
         with zipfile.ZipFile(zip_path, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
             used_names: set[str] = set()
@@ -575,6 +672,14 @@ HTML = r"""
       font-weight: 650;
     }
     button:disabled { opacity: .45; cursor: default; }
+    input[type="file"] {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 9px 11px;
+      background: #fff;
+      font-size: 13px;
+    }
     .stack { display: grid; gap: 10px; }
     .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
     .muted { color: var(--muted); font-size: 13px; }
@@ -711,7 +816,7 @@ HTML = r"""
   <main>
     <section class="stack">
       <h2>Files</h2>
-      <button onclick="chooseFiles()">Choose PDFs/images</button>
+      <input id="localFileInput" type="file" multiple accept=".pdf,.png,.jpg,.jpeg" onchange="uploadFiles(this.files)" />
       <button onclick="chooseFolder()">Choose folder</button>
       <div class="file-list" id="files">No files selected.</div>
       <h2>Output</h2>
@@ -784,9 +889,35 @@ Tenet Legacy Pty Ltd | company
     }
     function setBusy(isBusy) {
       document.querySelectorAll("button").forEach(button => button.disabled = isBusy);
+      document.querySelectorAll("input[type='file']").forEach(input => input.disabled = isBusy);
     }
     async function refresh() { await callApi("state"); }
     async function chooseFiles() { await callApi("choose_files"); }
+    async function uploadFiles(fileList) {
+      const files = Array.from(fileList || []);
+      if (!files.length) return;
+      setBusy(true);
+      try {
+        const payload = await Promise.all(files.map(readFileForUpload));
+        const state = await window.pywebview.api.upload_files(payload);
+        render(state);
+      } catch (error) {
+        const state = await window.pywebview.api.state();
+        state.warnings = [...(state.warnings || []), `File upload failed: ${error?.message || error}`];
+        render(state);
+      } finally {
+        document.getElementById("localFileInput").value = "";
+        setBusy(false);
+      }
+    }
+    function readFileForUpload(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve({ name: file.name, data_url: String(reader.result || "") });
+        reader.onerror = () => reject(reader.error || new Error(`Could not read ${file.name}`));
+        reader.readAsDataURL(file);
+      });
+    }
     async function chooseFolder() { await callApi("choose_folder"); }
     async function chooseOutput() { await callApi("choose_output_folder"); }
     async function detect() {

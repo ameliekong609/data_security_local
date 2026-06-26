@@ -1,4 +1,5 @@
 from pathlib import Path
+import base64
 
 import fitz
 
@@ -37,6 +38,40 @@ def test_bulk_custom_detections_adds_multiple_leftovers(tmp_path: Path):
         "Tenet Legacy Pty Ltd",
     ]
     assert {d["source"] for d in state["detections"]} == {"custom_bulk"}
+
+
+def test_upload_files_copies_supported_files_to_local_upload_dir(tmp_path: Path):
+    source = tmp_path / "source.pdf"
+    _write_pdf(source)
+
+    api = DesktopApi()
+    state = api.upload_files([
+        {
+            "name": "source.pdf",
+            "data_url": "data:application/pdf;base64,"
+            + base64.b64encode(source.read_bytes()).decode("ascii"),
+        }
+    ])
+
+    assert len(state["selected_files"]) == 1
+    uploaded = Path(state["selected_files"][0])
+    assert uploaded.exists()
+    assert uploaded.name == "source.pdf"
+    assert uploaded.read_bytes() == source.read_bytes()
+
+
+def test_upload_files_skips_unsupported_files(tmp_path: Path):
+    api = DesktopApi()
+    state = api.upload_files([
+        {
+            "name": "notes.txt",
+            "data_url": "data:text/plain;base64,"
+            + base64.b64encode(b"hello").decode("ascii"),
+        }
+    ])
+
+    assert state["selected_files"] == []
+    assert "Skipped unsupported file: notes.txt" in state["warnings"]
 
 
 def test_bulk_custom_detections_auto_generates_replacements(tmp_path: Path):
